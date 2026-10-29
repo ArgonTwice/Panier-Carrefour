@@ -3,7 +3,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 
-from . import ia
+from . import catalogues, ia
+from .catalogues import Catalogue
 from .models import DemandePanier, Extraction, Panier
 
 TYPES_IMAGE = {"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
@@ -22,6 +23,19 @@ async def extraction(captures: list[UploadFile]) -> Extraction:
             raise HTTPException(400, f"{c.filename} : format non supporté")
         images.append((await c.read(), c.content_type))
     return ia.extraire_offres(images)
+
+
+@app.get("/api/catalogues")
+def liste_catalogues() -> list[Catalogue]:
+    return catalogues.catalogues_en_cours()
+
+
+@app.post("/api/catalogues/{catalogue_id}/lecture")
+def lecture_catalogue(catalogue_id: int) -> Extraction:
+    catalogue = next((c for c in catalogues.catalogues_en_cours() if c.id == catalogue_id), None)
+    if not catalogue:
+        raise HTTPException(404, "Catalogue introuvable ou expiré")
+    return ia.lire_catalogue(catalogue, catalogues.pages(catalogue_id))
 
 
 @app.post("/api/panier")

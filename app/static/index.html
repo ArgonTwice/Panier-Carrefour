@@ -18,26 +18,32 @@
   .muted { color: var(--muted); font-size: .9rem; }
   .eco { color: var(--ok); font-weight: 600; }
   .err { color: var(--warn); }
+  #statut { position: sticky; top: 0; background: var(--bg); margin: 0; padding: 4px 0; }
   .x { background: none; color: var(--muted); padding: 0 6px; float: right; }
 </style>
 </head>
 <body>
 <h1>Panier Carrefour</h1>
+<p id="statut"></p>
 
-<h2>1. Mes offres</h2>
+<h2>1. Catalogues de la semaine</h2>
+<p class="muted">Lus automatiquement par l'IA (compte 1 à 3 minutes par catalogue).</p>
+<p><button id="btn-catalogues">Voir les catalogues en cours</button></p>
+<ul id="catalogues"></ul>
+
+<h2>2. Mes offres perso</h2>
 <p class="muted">Ajoute tes captures de l'appli Carrefour : bons, challenges, cagnotte, promos.</p>
 <input type="file" id="captures" accept="image/*" multiple>
 <p><button id="btn-extraire">Analyser les captures</button> <button id="btn-vider" class="x">Tout effacer</button></p>
 <p id="cagnotte" class="muted"></p>
 <ul id="offres"></ul>
 
-<h2>2. Mes besoins</h2>
+<h2>3. Mes besoins</h2>
 <textarea id="besoins" rows="5" placeholder="Un besoin par ligne : lait, pâtes, lessive…"></textarea>
 <p><label>Budget (€) <input type="number" id="budget" min="0" step="1"></label></p>
 
-<h2>3. Mon panier</h2>
+<h2>4. Mon panier</h2>
 <button id="btn-panier">Composer le panier</button>
-<p id="statut"></p>
 <div id="panier"></div>
 
 <script>
@@ -60,14 +66,38 @@ function sauver() {
 }
 function esc(s) { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
 
+const LIBELLES = { bon: "Bons", challenge: "Challenges", avantage: "Avantages", promo: "Promos" };
+
+function details(o) {
+  const paliers = (o.paliers || []).map((p) => `${p.achat_euros} € → ${p.gain_euros} €`).join(", ");
+  return [
+    o.active === false ? "à activer" : o.active ? "activé" : "",
+    o.deja_achete != null ? `déjà ${o.deja_achete} € d'achats` : "",
+    paliers, o.canal && o.canal !== "tous" ? o.canal : "", o.jour, o.conditions,
+    o.seuil_achat ? `dès ${o.seuil_achat} €` : "", o.date_fin ? `jusqu'au ${o.date_fin}` : "",
+  ].filter(Boolean).map(esc).join(" · ");
+}
+
 function afficherOffres() {
   $("cagnotte").textContent = etat.solde_cagnotte != null ? `Cagnotte : ${etat.solde_cagnotte} €` : "";
-  $("offres").innerHTML = etat.offres.map((o, i) => `
-    <li><button class="x" data-i="${i}" title="Retirer">✕</button>
-      <strong>${esc(o.produit)}</strong> ${o.marque ? "· " + esc(o.marque) : ""}<br>
-      ${esc(o.type)} · ${esc(o.remise_texte)}
-      <div class="muted">${[o.conditions, o.seuil_achat ? `dès ${o.seuil_achat} €` : "", o.date_fin ? `jusqu'au ${o.date_fin}` : ""].filter(Boolean).map(esc).join(" · ")}</div>
-    </li>`).join("") || '<li class="muted">Aucune offre pour l\'instant.</li>';
+  if (!etat.offres.length) { $("offres").innerHTML = '<li class="muted">Aucune offre pour l\'instant.</li>'; return; }
+  $("offres").innerHTML = Object.entries(LIBELLES).map(([type, libelle]) => {
+    const lignes = etat.offres.map((o, i) => [o, i]).filter(([o]) => o.type === type);
+    if (!lignes.length) return "";
+    return `<li><details ${type === "promo" ? "" : "open"}><summary><strong>${libelle} (${lignes.length})</strong></summary><ul>
+      ${lignes.map(([o, i]) => `
+        <li><button class="x" data-i="${i}" title="Retirer">✕</button>
+          <strong>${esc(o.produit)}</strong> ${o.marque ? "· " + esc(o.marque) : ""}<br>
+          ${esc(o.remise_texte)}${o.prix_euros != null ? ` · ${o.prix_euros} €` : ""}
+          <div class="muted">${details(o)}</div>
+        </li>`).join("")}</ul></details></li>`;
+  }).join("");
+}
+
+function ajouterOffres(data) {
+  etat.offres.push(...data.offres);
+  if (data.solde_cagnotte != null) etat.solde_cagnotte = data.solde_cagnotte;
+  sauver(); afficherOffres();
 }
 
 async function appel(url, options) {
@@ -91,11 +121,26 @@ $("btn-extraire").onclick = async () => {
   if (!fichiers.length) return;
   const fd = new FormData();
   for (const f of fichiers) fd.append("captures", f);
-  const data = await appel("/api/extraction", { method: "POST", body: fd });
-  etat.offres.push(...data.offres);
-  if (data.solde_cagnotte != null) etat.solde_cagnotte = data.solde_cagnotte;
+  ajouterOffres(await appel("/api/extraction", { method: "POST", body: fd }));
   $("captures").value = "";
-  sauver(); afficherOffres();
+};
+
+$("btn-catalogues").onclick = async () => {
+  const liste = await appel("/api/catalogues");
+  $("catalogues").innerHTML = liste.map((c) => `
+    <li><button class="x" data-lire="${c.id}">Lire</button>
+      <strong>${esc(c.titre)}</strong>
+      <div class="muted">${c.debut ? `du ${c.debut} au ${c.fin}` : ""}</div></li>`).join("");
+};
+
+$("catalogues").onclick = async (e) => {
+  const id = e.target.dataset.lire;
+  if (!id) return;
+  e.target.disabled = true;
+  try {
+    ajouterOffres(await appel(`/api/catalogues/${id}/lecture`, { method: "POST" }));
+    e.target.textContent = "Lu ✓";
+  } catch { e.target.disabled = false; }
 };
 
 $("offres").onclick = (e) => {

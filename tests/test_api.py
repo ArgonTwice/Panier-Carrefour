@@ -1,7 +1,9 @@
+from datetime import date
+
 from fastapi.testclient import TestClient
 
-from app import ia, main
-from app.models import Extraction, LignePanier, Offre, PropositionPanier
+from app import catalogues, ia, main
+from app.models import DemandePanier, Extraction, LignePanier, Offre, PropositionPanier
 
 client = TestClient(main.app)
 
@@ -74,3 +76,54 @@ def test_extraire_offres_appelle_gemini(monkeypatch):
     assert extraction.offres == [OFFRE]
     assert appel["config"].response_schema is Extraction
     assert appel["contents"][0].inline_data.mime_type == "image/png"
+
+
+LISTE_HTML = """<script type="application/ld+json">{"@graph": [
+ {"@type": "ItemList", "itemListElement": [
+  {"name": "Catalogue Carrefour", "url": "https://x/regardez/offres/catalogue-carrefour-42",
+   "image": {"@id": "https://cdn/flyers/42/thumbnailFixedWidth/catalogue-carrefour-vos-promos-h400WebP-a.webp"}},
+  {"name": "Catalogue Carrefour", "url": "https://x/regardez/offres/catalogue-carrefour-7",
+   "image": {"@id": "https://cdn/flyers/7/thumbnailFixedWidth/catalogue-carrefour-h400WebP-b.webp"}}]},
+ {"@type": "ImageObject", "@id": "https://cdn/flyers/42/thumbnailFixedWidth/catalogue-carrefour-vos-promos-h400WebP-a.webp",
+  "name": "Catalogue Carrefour - Valable: 27/10/2026 au 09/11/2026"},
+ {"@type": "ImageObject", "@id": "https://cdn/flyers/7/thumbnailFixedWidth/catalogue-carrefour-h400WebP-b.webp",
+  "name": "Catalogue Carrefour - Valable: 01/10/2026 au 20/10/2026"}]}</script>"""
+
+
+def test_parser_liste_catalogues():
+    c42, c7 = catalogues.parser_liste(LISTE_HTML)
+    assert (c42.id, c42.titre, str(c42.debut), str(c42.fin)) == (42, "Catalogue Carrefour : vos promos", "2026-10-27", "2026-11-09")
+    assert c7.titre == "Catalogue Carrefour"
+
+
+def test_catalogues_en_cours_ecarte_les_expires(monkeypatch):
+    monkeypatch.setattr(catalogues, "_get", lambda url: type("R", (), {"text": LISTE_HTML})())
+    assert [c.id for c in catalogues.catalogues_en_cours(date(2026, 10, 29))] == [42]
+
+
+def test_parser_pages_catalogue():
+    html = 'let flyerPages = [{"page":"\\/assets\\/uploads\\/flyers\\/42\\/%s\\/carrefour-1-a.jpeg"}];'
+    assert catalogues.parser_pages(html) == ["https://img.offers-cdn.net/assets/uploads/flyers/42/large/carrefour-1-a.jpeg"]
+
+
+def test_lire_catalogue_par_lots(monkeypatch):
+    lots = []
+
+    def faux_parse(contents, schema):
+        lots.append(len(contents) - 1)
+        return Extraction(solde_cagnotte=None, offres=[OFFRE])
+
+    monkeypatch.setattr(ia, "_parse", faux_parse)
+    cat = catalogues.Catalogue(id=42, titre="T", debut=None, fin=None, couverture="")
+    extraction = ia.lire_catalogue(cat, [(b"p", "image/jpeg")] * 25, par_appel=10)
+    assert sorted(lots) == [5, 10, 10]
+    assert len(extraction.offres) == 3
+
+
+def test_panier_ajoute_les_avantages_pass(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(ia, "_parse", lambda content, fmt: prompts.append(content) or PropositionPanier(
+        lignes=[], a_faire=[], offres_ecartees=[]))
+    ia.composer_panier(DemandePanier(besoins=["pommes"], offres=[OFFRE]))
+    ia.composer_panier(DemandePanier(besoins=["pommes"], offres=[OFFRE], carte_pass=False))
+    assert "Fruits et légumes" in prompts[0] and "Fruits et légumes" not in prompts[1]

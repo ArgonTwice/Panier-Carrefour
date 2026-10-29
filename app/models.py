@@ -3,14 +3,30 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class Palier(BaseModel):
+    achat_euros: float = Field(description="Montant d'achats à atteindre, ex. 3 pour '3 €'")
+    gain_euros: float = Field(description="Gain à ce palier, ex. 0.5 pour 'Je gagne 0,50€'")
+
+
 class Offre(BaseModel):
-    type: Literal["bon", "challenge", "promo"]
-    produit: str = Field(description="Produit ou rayon concerné, tel qu'écrit sur la capture")
+    type: Literal["bon", "challenge", "promo", "avantage"]
+    produit: str = Field(description="Produit, marque ou rayon concerné, tel qu'écrit sur la capture")
     marque: str | None
-    remise_texte: str = Field(description="Texte exact de l'avantage, ex. '-30% sur le 2e', '2€ en cagnotte'")
-    remise_euros: float | None = Field(description="Gain en € par achat si calculable, sinon null")
+    remise_texte: str = Field(description="Texte exact de l'avantage, ex. '2 ACHETÉS = 0,60 € D'ÉCONOMIES'")
+    remise_euros: float | None = Field(description="Remise fixe en € si l'offre en donne une")
+    prix_euros: float | None = Field(default=None, description="Prix affiché en € (après promo) si visible")
+    pourcentage: float | None = Field(default=None, description="Remise en %, ex. 15 pour '-15%'")
+    quantite_requise: int | None = Field(default=None, description="Nombre de produits à acheter, ex. 2 pour '2 ACHETÉS'")
     seuil_achat: float | None = Field(description="Montant minimum d'achat en € si l'offre en impose un")
-    conditions: str | None = Field(description="Conditions : quantité, enseigne, drive uniquement, etc.")
+    paliers: list[Palier] = Field(default=[], description="Paliers d'un challenge, dans l'ordre")
+    deja_achete: float | None = Field(default=None, description="Challenge : montant 'Mes achats' déjà réalisé en €")
+    active: bool | None = Field(default=None, description="true si 'Activé', false si bouton 'Activer' visible, sinon null")
+    canal: Literal["magasin", "drive", "tous"] | None = Field(
+        default=None, description="'magasin' (onglet En magasin), 'drive' (Drive & Livraison), 'tous' si les deux")
+    jour: str | None = Field(default=None, description="Jour de validité si l'offre est liée à un jour, ex. 'mercredi'")
+    versement: Literal["immediat", "cagnotte"] | None = Field(
+        default=None, description="'immediat' si remise en caisse, 'cagnotte' si crédité sur le compte fidélité")
+    conditions: str | None = Field(description="Conditions : hors promotions, exclusions, etc.")
     date_fin: str | None = Field(description="Date de fin au format AAAA-MM-JJ si visible")
 
 
@@ -46,3 +62,4 @@ class DemandePanier(BaseModel):
     budget: float | None = None
     offres: list[Offre]
     solde_cagnotte: float | None = None
+    carte_pass: bool = True
