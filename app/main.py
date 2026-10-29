@@ -3,10 +3,10 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 
-from . import claude
+from . import ia
 from .models import DemandePanier, Extraction, Panier
 
-TYPES_IMAGE = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+TYPES_IMAGE = {"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
 MAX_CAPTURES = 10
 
 app = FastAPI(title="Panier Carrefour")
@@ -21,14 +21,14 @@ async def extraction(captures: list[UploadFile]) -> Extraction:
         if c.content_type not in TYPES_IMAGE:
             raise HTTPException(400, f"{c.filename} : format non supporté")
         images.append((await c.read(), c.content_type))
-    return claude.extraire_offres(images)
+    return ia.extraire_offres(images)
 
 
 @app.post("/api/panier")
 def panier(demande: DemandePanier) -> Panier:
     if not demande.offres:
         raise HTTPException(400, "Aucune offre : importe d'abord tes captures")
-    return claude.composer_panier(demande)
+    return ia.composer_panier(demande)
 
 
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")

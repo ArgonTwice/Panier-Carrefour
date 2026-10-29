@@ -1,10 +1,11 @@
-import base64
+import os
 
-import anthropic
+from google import genai
+from google.genai import types
 
 from .models import DemandePanier, Extraction, Panier, PropositionPanier
 
-MODEL = "claude-opus-5-5"
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 
 PROMPT_EXTRACTION = """Ces captures viennent de l'appli Carrefour d'un client (bons de réduction, challenges, promos, cagnotte).
 Liste chaque offre visible, une seule fois même si elle apparaît sur plusieurs captures.
@@ -27,28 +28,21 @@ Règles :
 - Les prix sont des estimations : mets null si tu n'as aucune base pour estimer."""
 
 
-def _parse(content, output_format):
-    reponse = anthropic.Anthropic().messages.parse(
+def _parse(contents, schema):
+    # Clé lue dans GEMINI_API_KEY par le SDK
+    reponse = genai.Client().models.generate_content(
         model=MODEL,
-        max_tokens=16000,
-        messages=[{"role": "user", "content": content}],
-        output_format=output_format,
+        contents=contents,
+        config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema),
     )
-    if reponse.stop_reason == "refusal":
-        raise RuntimeError("Requête refusée par le modèle")
-    return reponse.parsed_output
+    if not reponse.text:
+        raise RuntimeError("Réponse vide du modèle")
+    return schema.model_validate_json(reponse.text)
 
 
 def extraire_offres(images: list[tuple[bytes, str]]) -> Extraction:
-    content = [
-        {
-            "type": "image",
-            "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(data).decode()},
-        }
-        for data, media_type in images
-    ]
-    content.append({"type": "text", "text": PROMPT_EXTRACTION})
-    return _parse(content, Extraction)
+    parts = [types.Part.from_bytes(data=data, mime_type=media_type) for data, media_type in images]
+    return _parse([*parts, PROMPT_EXTRACTION], Extraction)
 
 
 def composer_panier(demande: DemandePanier) -> Panier:

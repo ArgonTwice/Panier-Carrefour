@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app import claude, main
+from app import ia, main
 from app.models import Extraction, LignePanier, Offre, PropositionPanier
 
 client = TestClient(main.app)
@@ -17,12 +17,12 @@ def ligne(prix, eco, besoin=True):
 
 
 def test_totaliser_recalcule_les_totaux():
-    p = claude.totaliser(PropositionPanier(lignes=[ligne(3.5, 1), ligne(None, 0.5)], a_faire=[], offres_ecartees=[]), 3)
+    p = ia.totaliser(PropositionPanier(lignes=[ligne(3.5, 1), ligne(None, 0.5)], a_faire=[], offres_ecartees=[]), 3)
     assert (p.total_estime, p.economie_totale, p.hors_budget) == (3.5, 1.5, True)
 
 
 def test_totaliser_sans_budget():
-    p = claude.totaliser(PropositionPanier(lignes=[ligne(10, 0)], a_faire=[], offres_ecartees=[]), None)
+    p = ia.totaliser(PropositionPanier(lignes=[ligne(10, 0)], a_faire=[], offres_ecartees=[]), None)
     assert not p.hors_budget
 
 
@@ -33,7 +33,7 @@ def test_extraction(monkeypatch):
         recu["images"] = images
         return Extraction(solde_cagnotte=4.2, offres=[OFFRE])
 
-    monkeypatch.setattr(claude, "extraire_offres", faux)
+    monkeypatch.setattr(ia, "extraire_offres", faux)
     r = client.post("/api/extraction", files=[("captures", ("a.png", b"img", "image/png"))])
     assert r.status_code == 200
     assert r.json()["solde_cagnotte"] == 4.2
@@ -50,7 +50,7 @@ def test_panier_sans_offre():
 
 
 def test_panier(monkeypatch):
-    monkeypatch.setattr(claude, "_parse", lambda content, fmt: PropositionPanier(
+    monkeypatch.setattr(ia, "_parse", lambda content, fmt: PropositionPanier(
         lignes=[ligne(5, 2)], a_faire=["Activer le bon lessive"], offres_ecartees=[]))
     r = client.post("/api/panier", json={"besoins": ["lessive"], "budget": 20, "offres": [OFFRE.model_dump()]})
     assert r.status_code == 200
@@ -59,3 +59,18 @@ def test_panier(monkeypatch):
 
 def test_page_accueil():
     assert "Panier Carrefour" in client.get("/").text
+
+
+def test_extraire_offres_appelle_gemini(monkeypatch):
+    appel = {}
+
+    class FauxModels:
+        def generate_content(self, model, contents, config):
+            appel.update(model=model, contents=contents, config=config)
+            return type("R", (), {"text": Extraction(solde_cagnotte=None, offres=[OFFRE]).model_dump_json()})()
+
+    monkeypatch.setattr(ia.genai, "Client", lambda: type("C", (), {"models": FauxModels()})())
+    extraction = ia.extraire_offres([(b"img", "image/png")])
+    assert extraction.offres == [OFFRE]
+    assert appel["config"].response_schema is Extraction
+    assert appel["contents"][0].inline_data.mime_type == "image/png"
