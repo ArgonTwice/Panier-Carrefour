@@ -69,7 +69,7 @@ def test_extraire_offres_appelle_gemini(monkeypatch):
     class FauxModels:
         def generate_content(self, model, contents, config):
             appel.update(model=model, contents=contents, config=config)
-            return type("R", (), {"text": Extraction(solde_cagnotte=None, offres=[OFFRE]).model_dump_json()})()
+            return type("R", (), {"candidates": [], "text": Extraction(solde_cagnotte=None, offres=[OFFRE]).model_dump_json()})()
 
     monkeypatch.setattr(ia.genai, "Client", lambda **kw: type("C", (), {"models": FauxModels()})())
     extraction = ia.extraire_offres([(b"img", "image/png")])
@@ -121,9 +121,21 @@ def test_lire_catalogue_par_lots(monkeypatch):
 
     monkeypatch.setattr(ia, "_parse", faux_parse)
     cat = catalogues.Catalogue(id=42, titre="T", debut=None, fin=None, couverture="")
-    extraction = ia.lire_catalogue(cat, [(b"p", "image/jpeg")] * 25, par_appel=10)
+    extraction, complet = ia.lire_catalogue(cat, [(b"p", "image/jpeg")] * 25, par_appel=10)
     assert sorted(lots) == [5, 10, 10]
-    assert len(extraction.offres) == 3
+    assert len(extraction.offres) == 3 and complet
+
+
+def test_lire_catalogue_saute_un_lot_en_echec(monkeypatch):
+    def faux_parse(contents, schema):
+        if len(contents) == 6:
+            raise RuntimeError("tronqué")
+        return Extraction(solde_cagnotte=None, offres=[OFFRE])
+
+    monkeypatch.setattr(ia, "_parse", faux_parse)
+    cat = catalogues.Catalogue(id=42, titre="T", debut=None, fin=None, couverture="")
+    extraction, complet = ia.lire_catalogue(cat, [(b"p", "image/jpeg")] * 15, par_appel=10)
+    assert len(extraction.offres) == 1 and not complet
 
 
 def test_panier_ajoute_les_avantages_pass(monkeypatch):
@@ -185,13 +197,16 @@ def test_lire_avec_cache_ne_lit_qu_une_fois(monkeypatch, tmp_path):
     appels = []
     cat = catalogues.Catalogue(id=42, titre="T", debut=None, fin=None, couverture="")
 
-    def lire(c):
+    def lire(c, complet=True):
         appels.append(c.id)
-        return Extraction(solde_cagnotte=None, offres=[OFFRE])
+        return Extraction(solde_cagnotte=None, offres=[OFFRE]), complet
 
     assert catalogues.lire_avec_cache(cat, lire) == [OFFRE]
     assert catalogues.lire_avec_cache(cat, lire) == [OFFRE]
     assert appels == [42]
+    autre = cat.model_copy(update={"id": 43})
+    catalogues.lire_avec_cache(autre, lambda c: lire(c, complet=False))
+    assert not catalogues.est_en_cache(autre)
 
 
 def test_promos_semaine(monkeypatch, tmp_path):
@@ -199,7 +214,17 @@ def test_promos_semaine(monkeypatch, tmp_path):
     cats = [catalogues.Catalogue(id=i, titre="T", debut=None, fin=None, couverture="") for i in (1, 2)]
     monkeypatch.setattr(catalogues, "catalogues_en_cours", lambda: cats)
     monkeypatch.setattr(catalogues, "pages", lambda i: [])
-    monkeypatch.setattr(ia, "lire_catalogue", lambda c, pages: Extraction(solde_cagnotte=None, offres=[OFFRE]))
+    monkeypatch.setattr(ia, "lire_catalogue", lambda c, pages: (Extraction(solde_cagnotte=None, offres=[OFFRE]), True))
     r = client.post("/api/promos-semaine")
     assert r.status_code == 200
     assert len(r.json()["catalogues"]) == 2 and len(r.json()["offres"]) == 2
+    assert client.get("/api/progression").json() == {"lus": 2, "total": 2}
+
+
+def test_erreur_serveur_renvoie_du_json(monkeypatch):
+    def plante():
+        raise RuntimeError("clé invalide")
+
+    monkeypatch.setattr(catalogues, "catalogues_en_cours", plante)
+    r = TestClient(main.app, raise_server_exceptions=False).post("/api/promos-semaine")
+    assert r.status_code == 500 and r.json() == {"detail": "RuntimeError : clé invalide"}

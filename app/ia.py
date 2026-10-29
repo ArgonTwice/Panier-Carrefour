@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 
@@ -9,6 +10,8 @@ from .avantages import AVANTAGES_PASS
 from .catalogues import Catalogue
 from .historique import annoter
 from .models import DemandePanier, Extraction, Panier, PropositionPanier
+
+log = logging.getLogger("uvicorn.error")
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 # Le palier gratuit limite les requêtes par minute : on réessaie au lieu d'échouer
@@ -77,10 +80,14 @@ def _parse(contents, schema):
     reponse = genai.Client(http_options=RETRY).models.generate_content(
         model=MODEL,
         contents=contents,
-        config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema),
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json", response_schema=schema, max_output_tokens=65536),
     )
+    fin = reponse.candidates[0].finish_reason if reponse.candidates else None
+    if fin == types.FinishReason.MAX_TOKENS:
+        raise RuntimeError("Réponse de Gemini tronquée (trop d'offres d'un coup)")
     if not reponse.text:
-        raise RuntimeError("Réponse vide du modèle")
+        raise RuntimeError(f"Réponse vide de Gemini ({fin})")
     return schema.model_validate_json(reponse.text)
 
 
@@ -92,13 +99,25 @@ def _parts(images: list[tuple[bytes, str]]) -> list[types.Part]:
     return [types.Part.from_bytes(data=data, mime_type=media_type) for data, media_type in images]
 
 
-def lire_catalogue(catalogue: Catalogue, pages: list[tuple[bytes, str]], par_appel: int = 10) -> Extraction:
+def lire_catalogue(catalogue: Catalogue, pages: list[tuple[bytes, str]], par_appel: int = 5) -> tuple[Extraction, bool]:
+    """Lit le catalogue par petits lots de pages ; un lot en échec est sauté. Renvoie (extraction, complet)."""
     prompt = PROMPT_CATALOGUE.format(titre=catalogue.titre, debut=catalogue.debut, fin=catalogue.fin)
     lots = [pages[i:i + par_appel] for i in range(0, len(pages), par_appel)]
-    # Quelques appels en parallèle : un catalogue fait souvent 50 à 80 pages
+
+    def lire_lot(lot):
+        try:
+            return _parse([*_parts(lot), prompt], Extraction)
+        except Exception as e:
+            log.warning("Catalogue %s : lot de pages ignoré (%s)", catalogue.id, e)
+            return e
+
     with ThreadPoolExecutor(max_workers=4) as pool:
-        extractions = list(pool.map(lambda lot: _parse([*_parts(lot), prompt], Extraction), lots))
-    return Extraction(solde_cagnotte=None, offres=[o for e in extractions for o in e.offres])
+        resultats = list(pool.map(lire_lot, lots))
+    echecs = [r for r in resultats if isinstance(r, Exception)]
+    if lots and len(echecs) == len(lots):
+        raise echecs[0]
+    offres = [o for r in resultats if isinstance(r, Extraction) for o in r.offres]
+    return Extraction(solde_cagnotte=None, offres=offres), not echecs
 
 
 def composer_panier(demande: DemandePanier) -> Panier:

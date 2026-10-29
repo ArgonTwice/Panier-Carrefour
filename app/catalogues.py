@@ -1,6 +1,8 @@
 """Catalogues Carrefour publiés sur promocatalogues.fr (pages du catalogue en images)."""
 import json
 import re
+import threading
+import time
 from datetime import date, datetime
 from pathlib import Path
 
@@ -68,10 +70,17 @@ def parser_pages(html: str) -> list[str]:
     return [CDN + p["page"].replace("%s", "large") for p in json.loads(m.group(1))]
 
 
+_liste: tuple[float, list[Catalogue]] = (0, [])
+
+
 def catalogues_en_cours(aujourdhui: date | None = None) -> list[Catalogue]:
+    global _liste
     aujourdhui = aujourdhui or date.today()
+    # La liste change au plus une fois par jour : on évite de la retélécharger à chaque appel
+    if time.time() - _liste[0] > 3600 or aujourdhui != date.today():
+        _liste = (time.time(), parser_liste(_get(LISTE).text))
     return [
-        c for c in parser_liste(_get(LISTE).text)
+        c for c in _liste[1]
         if (not c.fin or c.fin >= aujourdhui) and not any(mot in c.titre.lower() + " " for mot in EXCLUS)
     ]
 
@@ -81,12 +90,25 @@ def pages(catalogue_id: int) -> list[tuple[bytes, str]]:
     return [(_get(url).content, "image/jpeg") for url in parser_pages(html)]
 
 
+_verrou = threading.Lock()
+
+
+def est_en_cache(catalogue: Catalogue) -> bool:
+    return (CACHE / f"{catalogue.id}.json").exists()
+
+
 def lire_avec_cache(catalogue: Catalogue, lire) -> list[Offre]:
-    """Un catalogue ne change pas : on ne le fait lire qu'une fois par l'IA (lire(catalogue) -> Extraction)."""
-    fichier = CACHE / f"{catalogue.id}.json"
-    if fichier.exists():
-        return Extraction.model_validate_json(fichier.read_text()).offres
-    extraction = lire(catalogue)
-    CACHE.mkdir(parents=True, exist_ok=True)
-    fichier.write_text(extraction.model_dump_json())
-    return extraction.offres
+    """Un catalogue ne change pas : on ne le fait lire qu'une fois par l'IA.
+
+    lire(catalogue) -> (Extraction, complet). Une lecture incomplète n'est pas mise en cache, pour être reprise.
+    Le verrou évite de lire deux fois le même catalogue (lecture de fond + clic sur le bouton).
+    """
+    with _verrou:
+        fichier = CACHE / f"{catalogue.id}.json"
+        if fichier.exists():
+            return Extraction.model_validate_json(fichier.read_text()).offres
+        extraction, complet = lire(catalogue)
+        if complet:
+            CACHE.mkdir(parents=True, exist_ok=True)
+            fichier.write_text(extraction.model_dump_json())
+        return extraction.offres

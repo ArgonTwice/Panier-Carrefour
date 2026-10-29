@@ -30,7 +30,8 @@
 <textarea id="besoins" rows="4" placeholder="Mes besoins de la semaine, un par ligne : lait, pâtes, lessive…"></textarea>
 <p><label>Budget (€) <input type="number" id="budget" min="0" step="1"></label></p>
 <p><button id="btn-panier" class="grand">🛒 Préparer mon panier</button></p>
-<p class="muted">Lit tout seul les catalogues de la semaine, puis compose le panier avec tes offres perso.</p>
+<p class="muted">Lit tout seul les catalogues de la semaine, puis compose le panier avec tes offres perso.
+<br><span id="progression"></span></p>
 <div id="panier"></div>
 
 <h2>Mes offres perso</h2>
@@ -143,7 +144,9 @@ async function appel(url, options, message = "Analyse en cours…") {
   $("statut").className = "muted";
   try {
     const r = await fetch(url, options);
-    const data = await r.json();
+    const texte = await r.text();
+    let data;
+    try { data = JSON.parse(texte); } catch { data = { detail: texte.slice(0, 200) }; }
     if (!r.ok) throw new Error(data.detail || r.statusText);
     $("statut").textContent = "";
     return data;
@@ -174,7 +177,7 @@ for (const c of CHAMPS) $(c).oninput = sauver;
 
 $("btn-panier").onclick = async () => {
   $("btn-panier").disabled = true;
-  try { await preparer(); } finally { $("btn-panier").disabled = false; }
+  try { await preparer(); } catch {} finally { $("btn-panier").disabled = false; }
 };
 
 async function preparer() {
@@ -211,6 +214,18 @@ async function preparer() {
     ${p.offres_ecartees.length ? `<details><summary class="muted">Offres écartées (${p.offres_ecartees.length})</summary><ul>${p.offres_ecartees.map((o) => `<li class="muted">${esc(o)}</li>`).join("")}</ul></details>` : ""}`;
 }
 
+// Les catalogues sont lus en arrière-plan dès le lancement : on affiche où en est la lecture
+async function suivreLecture() {
+  try {
+    const { lus, total } = await (await fetch("/api/progression")).json();
+    $("progression").textContent = lus < total
+      ? `Lecture des catalogues en arrière-plan : ${lus}/${total}… (la première fois de la semaine seulement)`
+      : `✓ ${total} catalogues de la semaine prêts`;
+    if (lus < total) setTimeout(suivreLecture, 5000);
+  } catch { setTimeout(suivreLecture, 10000); }
+}
+
+suivreLecture();
 charger(); purgerExpirees(); sauver(); afficherOffres(); afficherHistorique();
 </script>
 </body>
