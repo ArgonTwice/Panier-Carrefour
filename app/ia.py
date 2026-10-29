@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor
 
 from google import genai
 from google.genai import types
@@ -10,14 +9,22 @@ from google.genai import types
 from .avantages import AVANTAGES_PASS
 from .catalogues import Catalogue
 from .historique import annoter
-from .models import DemandePanier, Extraction, Panier, PropositionPanier
+from .models import DemandePanier, Extraction, LectureCatalogue, Offre, Panier, PropositionPanier
 
 log = logging.getLogger("uvicorn.error")
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 # Le palier gratuit limite les requêtes par minute : on réessaie au lieu d'échouer
 RETRY = types.HttpOptions(retry_options=types.HttpRetryOptions(
-    attempts=6, initial_delay=5, max_delay=60, http_status_codes=[429, 500, 503]))
+    attempts=3, initial_delay=10, max_delay=40, http_status_codes=[429, 500, 503]))
+
+
+class QuotaEpuise(RuntimeError):
+    """Quota journalier de Gemini atteint : inutile de réessayer avant le lendemain."""
+
+
+def _quota_journalier(e: Exception) -> bool:
+    return "RESOURCE_EXHAUSTED" in str(e) and "PerDay" in str(e)
 
 PROMPT_EXTRACTION = """Ces captures viennent de l'appli Carrefour d'un client qui a la carte PASS et le Club Carrefour.
 Liste chaque offre visible, une seule fois même si elle apparaît sur plusieurs captures.
@@ -34,11 +41,11 @@ Repères pour classer les offres :
 Le solde de la cagnotte est affiché "Votre cagnotte".
 N'invente rien : un champ illisible ou absent vaut null."""
 
-PROMPT_CATALOGUE = """Ces images sont des pages du catalogue Carrefour "{titre}", valable du {debut} au {fin}.
-Liste chaque produit en promotion : type "promo", produit, marque, texte exact de la promo, prix affiché après remise,
-remise en € ou en %, quantité requise ("2 achetés", "le 2ème à -60%"), conditions ("avec la carte", "en magasin uniquement").
-date_fin = {fin}. Ignore les pages sans offre (couverture, mentions légales).
-N'invente rien : un champ illisible ou absent vaut null."""
+PROMPT_CATALOGUE = """Ces images sont les pages du catalogue Carrefour "{titre}", valable du {debut} au {fin}.
+Liste chaque produit en promotion, une ligne par produit : produit, marque, texte exact de la promo
+(ex. "2ème à -60%", "34% d'économies avec la carte", "Prenez-en 3, payez-en 2") et prix affiché.
+Ignore les pages sans offre (couverture, mentions légales). N'invente rien : ce qui est illisible vaut null."""
+
 
 PROMPT_PANIER = """Tu composes le panier de courses Carrefour de la semaine pour un client qui a la carte PASS et le Club Carrefour.
 
@@ -91,12 +98,17 @@ def _client() -> genai.Client:
 
 def _parse(contents, schema):
     # Clé lue dans GEMINI_API_KEY par le SDK
-    reponse = _client().models.generate_content(
-        model=MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json", response_schema=schema, max_output_tokens=65536),
-    )
+    try:
+        reponse = _client().models.generate_content(
+            model=MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json", response_schema=schema, max_output_tokens=65536),
+        )
+    except Exception as e:
+        if _quota_journalier(e):
+            raise QuotaEpuise("Quota gratuit de Gemini atteint pour aujourd'hui : réessaie demain") from e
+        raise
     fin = reponse.candidates[0].finish_reason if reponse.candidates else None
     if fin == types.FinishReason.MAX_TOKENS:
         raise RuntimeError("Réponse de Gemini tronquée (trop d'offres d'un coup)")
@@ -113,25 +125,28 @@ def _parts(images: list[tuple[bytes, str]]) -> list[types.Part]:
     return [types.Part.from_bytes(data=data, mime_type=media_type) for data, media_type in images]
 
 
-def lire_catalogue(catalogue: Catalogue, pages: list[tuple[bytes, str]], par_appel: int = 5) -> tuple[Extraction, bool]:
-    """Lit le catalogue par petits lots de pages ; un lot en échec est sauté. Renvoie (extraction, complet)."""
+def lire_catalogue(catalogue: Catalogue, pages: list[tuple[bytes, str]], par_appel: int = 50) -> tuple[Extraction, bool]:
+    """Lit le catalogue en une ou deux requêtes (format court). Renvoie (extraction, complet)."""
     prompt = PROMPT_CATALOGUE.format(titre=catalogue.titre, debut=catalogue.debut, fin=catalogue.fin)
-    lots = [pages[i:i + par_appel] for i in range(0, len(pages), par_appel)]
-
-    def lire_lot(lot):
+    offres, complet = [], True
+    for i in range(0, len(pages), par_appel):
         try:
-            return _parse([*_parts(lot), prompt], Extraction)
+            lecture = _parse([*_parts(pages[i:i + par_appel]), prompt], LectureCatalogue)
+        except QuotaEpuise:
+            raise
         except Exception as e:
-            log.warning("Catalogue %s : lot de pages ignoré (%s)", catalogue.id, e)
-            return e
-
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        resultats = list(pool.map(lire_lot, lots))
-    echecs = [r for r in resultats if isinstance(r, Exception)]
-    if lots and len(echecs) == len(lots):
-        raise echecs[0]
-    offres = [o for r in resultats if isinstance(r, Extraction) for o in r.offres]
-    return Extraction(solde_cagnotte=None, offres=offres), not echecs
+            log.warning("Catalogue %s : pages %s+ ignorées (%s)", catalogue.id, i + 1, e)
+            complet = False
+            continue
+        offres += [
+            Offre(type="promo", produit=p.produit, marque=p.marque, remise_texte=p.promo, remise_euros=None,
+                  prix_euros=p.prix, seuil_achat=None, conditions=None,
+                  date_fin=str(catalogue.fin) if catalogue.fin else None)
+            for p in lecture.promos
+        ]
+    if not offres and not complet:
+        raise RuntimeError(f"Lecture du catalogue {catalogue.titre} impossible")
+    return Extraction(solde_cagnotte=None, offres=offres), complet
 
 
 def composer_panier(demande: DemandePanier) -> Panier:

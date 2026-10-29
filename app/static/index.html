@@ -181,8 +181,8 @@ $("btn-panier").onclick = async () => {
 };
 
 async function preparer() {
-  const semaine = await appel("/api/promos-semaine", { method: "POST" },
-    "Lecture des catalogues de la semaine… (quelques minutes la première fois, instantané ensuite)");
+  const semaine = await appel("/api/promos-semaine", { method: "POST" }, "Récupération des promos…");
+  setTimeout(suivreLecture, 1000);
   releverPrix(semaine.offres);
   sauver();
   const p = await appel("/api/panier", {
@@ -217,12 +217,14 @@ async function preparer() {
 // Les catalogues sont lus en arrière-plan dès le lancement : on affiche où en est la lecture
 async function suivreLecture() {
   try {
-    const { lus, total } = await (await fetch("/api/progression")).json();
-    $("progression").textContent = lus < total
-      ? `Lecture des catalogues en arrière-plan : ${lus}/${total}… (la première fois de la semaine seulement)`
-      : `✓ ${total} catalogues de la semaine prêts`;
-    if (lus < total) setTimeout(suivreLecture, 5000);
-  } catch { setTimeout(suivreLecture, 10000); }
+    const { lus, total, en_cours, erreur } = await (await fetch("/api/progression")).json();
+    $("progression").textContent = erreur
+      ? `⚠️ ${erreur} (${lus}/${total} catalogues lus)`
+      : lus < total
+        ? `Lecture des catalogues en arrière-plan : ${lus}/${total}… Tu peux déjà préparer ton panier.`
+        : `✓ ${total} catalogues de la semaine prêts`;
+    if (en_cours) setTimeout(suivreLecture, 10000);
+  } catch { setTimeout(suivreLecture, 20000); }
 }
 
 suivreLecture();

@@ -1,12 +1,15 @@
 """Catalogues Carrefour publiés sur promocatalogues.fr (pages du catalogue en images)."""
+import io
 import json
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
 import httpx
+from PIL import Image
 from pydantic import BaseModel
 
 from .models import Extraction, Offre
@@ -87,7 +90,18 @@ def catalogues_en_cours(aujourdhui: date | None = None) -> list[Catalogue]:
 
 def pages(catalogue_id: int) -> list[tuple[bytes, str]]:
     html = _get(f"{SITE}/regardez/offres/catalogue-carrefour-{catalogue_id}").text
-    return [(_get(url).content, "image/jpeg") for url in parser_pages(html)]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        images = list(pool.map(lambda url: alleger(_get(url).content), parser_pages(html)))
+    return [(image, "image/jpeg") for image in images]
+
+
+def alleger(image: bytes) -> bytes:
+    # Pages plus légères pour en envoyer des dizaines dans une seule requête Gemini (limite ~20 Mo)
+    im = Image.open(io.BytesIO(image)).convert("RGB")
+    im.thumbnail((900, 1500))
+    sortie = io.BytesIO()
+    im.save(sortie, "JPEG", quality=70)
+    return sortie.getvalue()
 
 
 _verrou = threading.Lock()
@@ -95,6 +109,10 @@ _verrou = threading.Lock()
 
 def est_en_cache(catalogue: Catalogue) -> bool:
     return (CACHE / f"{catalogue.id}.json").exists()
+
+
+def offres_en_cache(catalogue: Catalogue) -> list[Offre]:
+    return Extraction.model_validate_json((CACHE / f"{catalogue.id}.json").read_text()).offres
 
 
 def lire_avec_cache(catalogue: Catalogue, lire) -> list[Offre]:

@@ -1,9 +1,12 @@
 from datetime import date
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app import catalogues, historique, ia, main
-from app.models import DemandePanier, Extraction, LignePanier, Offre, PropositionPanier, Releve
+from app.models import (DemandePanier, Extraction, LectureCatalogue, LignePanier, Offre, PromoCatalogue,
+                        PropositionPanier, Releve)
 
 client = TestClient(main.app)
 
@@ -113,30 +116,47 @@ def test_parser_pages_catalogue():
     assert catalogues.parser_pages(html) == ["https://img.offers-cdn.net/assets/uploads/flyers/42/large/carrefour-1-a.jpeg"]
 
 
-def test_lire_catalogue_par_lots(monkeypatch):
+LECTURE = LectureCatalogue(promos=[PromoCatalogue(produit="Saumon", marque="Delpeyrat", promo="-34%", prix=4.99)])
+CAT = catalogues.Catalogue(id=42, titre="T", debut=date(2026, 10, 27), fin=date(2026, 11, 9), couverture="")
+
+
+def test_lire_catalogue_en_peu_de_requetes(monkeypatch):
     lots = []
 
     def faux_parse(contents, schema):
         lots.append(len(contents) - 1)
-        return Extraction(solde_cagnotte=None, offres=[OFFRE])
+        return LECTURE
 
     monkeypatch.setattr(ia, "_parse", faux_parse)
-    cat = catalogues.Catalogue(id=42, titre="T", debut=None, fin=None, couverture="")
-    extraction, complet = ia.lire_catalogue(cat, [(b"p", "image/jpeg")] * 25, par_appel=10)
-    assert sorted(lots) == [5, 10, 10]
-    assert len(extraction.offres) == 3 and complet
+    extraction, complet = ia.lire_catalogue(CAT, [(b"p", "image/jpeg")] * 75)
+    assert lots == [50, 25] and complet
+    o = extraction.offres[0]
+    assert (o.type, o.produit, o.remise_texte, o.prix_euros, o.date_fin) == ("promo", "Saumon", "-34%", 4.99, "2026-11-09")
 
 
 def test_lire_catalogue_saute_un_lot_en_echec(monkeypatch):
     def faux_parse(contents, schema):
-        if len(contents) == 6:
+        if len(contents) == 26:
             raise RuntimeError("tronqué")
-        return Extraction(solde_cagnotte=None, offres=[OFFRE])
+        return LECTURE
 
     monkeypatch.setattr(ia, "_parse", faux_parse)
-    cat = catalogues.Catalogue(id=42, titre="T", debut=None, fin=None, couverture="")
-    extraction, complet = ia.lire_catalogue(cat, [(b"p", "image/jpeg")] * 15, par_appel=10)
+    extraction, complet = ia.lire_catalogue(CAT, [(b"p", "image/jpeg")] * 75)
     assert len(extraction.offres) == 1 and not complet
+
+
+def test_lire_catalogue_s_arrete_si_quota_du_jour(monkeypatch):
+    def faux_parse(contents, schema):
+        raise ia.QuotaEpuise("quota")
+
+    monkeypatch.setattr(ia, "_parse", faux_parse)
+    with pytest.raises(ia.QuotaEpuise):
+        ia.lire_catalogue(CAT, [(b"p", "image/jpeg")] * 75)
+
+
+def test_quota_journalier_detecte():
+    assert ia._quota_journalier(Exception("429 RESOURCE_EXHAUSTED ... GenerateRequestsPerDayPerProjectPerModel-FreeTier"))
+    assert not ia._quota_journalier(Exception("429 RESOURCE_EXHAUSTED ... PerMinute"))
 
 
 def test_panier_ajoute_les_avantages_pass(monkeypatch):
@@ -210,16 +230,36 @@ def test_lire_avec_cache_ne_lit_qu_une_fois(monkeypatch, tmp_path):
     assert not catalogues.est_en_cache(autre)
 
 
-def test_promos_semaine(monkeypatch, tmp_path):
+def test_promos_semaine_renvoie_les_catalogues_deja_lus(monkeypatch, tmp_path):
     monkeypatch.setattr(catalogues, "CACHE", tmp_path)
     cats = [catalogues.Catalogue(id=i, titre="T", debut=None, fin=None, couverture="") for i in (1, 2)]
     monkeypatch.setattr(catalogues, "catalogues_en_cours", lambda: cats)
     monkeypatch.setattr(catalogues, "pages", lambda i: [])
+    monkeypatch.setattr(main, "relancer_lecture", lambda: None)
     monkeypatch.setattr(ia, "lire_catalogue", lambda c, pages: (Extraction(solde_cagnotte=None, offres=[OFFRE]), True))
-    r = client.post("/api/promos-semaine")
-    assert r.status_code == 200
-    assert len(r.json()["catalogues"]) == 2 and len(r.json()["offres"]) == 2
-    assert client.get("/api/progression").json() == {"lus": 2, "total": 2}
+    catalogues.lire_avec_cache(cats[0], lambda c: ia.lire_catalogue(c, []))
+    r = client.post("/api/promos-semaine").json()
+    assert len(r["catalogues"]) == 1 and len(r["offres"]) == 1
+    assert client.get("/api/progression").json()["lus"] == 1
+    main.lire_en_fond()
+    assert client.get("/api/progression").json() == {"lus": 2, "total": 2, "en_cours": False, "erreur": None}
+
+
+def test_lecture_de_fond_s_arrete_sur_quota(monkeypatch, tmp_path):
+    monkeypatch.setattr(catalogues, "CACHE", tmp_path)
+    cats = [catalogues.Catalogue(id=i, titre="T", debut=None, fin=None, couverture="") for i in (1, 2)]
+    monkeypatch.setattr(catalogues, "catalogues_en_cours", lambda: cats)
+    monkeypatch.setattr(catalogues, "pages", lambda i: [])
+    appels = []
+
+    def lire(c, pages):
+        appels.append(c.id)
+        raise ia.QuotaEpuise("Quota du jour")
+
+    monkeypatch.setattr(ia, "lire_catalogue", lire)
+    main.lire_en_fond()
+    assert appels == [1] and main.lecture["erreur"] == "Quota du jour"
+    main.lecture["erreur"] = None
 
 
 def test_erreur_serveur_renvoie_du_json(monkeypatch):
@@ -235,3 +275,11 @@ def test_client_gemini_partage(monkeypatch):
     monkeypatch.setattr(ia.genai, "Client", lambda **kw: object())
     monkeypatch.setattr(ia, "_instance", None)
     assert ia._client() is ia._client()
+
+
+def test_alleger_page():
+    import io
+    from PIL import Image
+    tampon = io.BytesIO()
+    Image.new("RGB", (1193, 2000), "white").save(tampon, "JPEG")
+    assert Image.open(io.BytesIO(catalogues.alleger(tampon.getvalue()))).size == (895, 1500)

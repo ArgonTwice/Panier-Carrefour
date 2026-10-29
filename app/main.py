@@ -18,25 +18,36 @@ MAX_CAPTURES = 10
 log = logging.getLogger("uvicorn.error")
 
 
-def lire_catalogues() -> list[Offre]:
-    return [
-        o for c in catalogues.catalogues_en_cours()
-        for o in catalogues.lire_avec_cache(c, lambda c: ia.lire_catalogue(c, catalogues.pages(c.id)))
-    ]
+lecture = {"en_cours": False, "erreur": None}
 
 
 def lire_en_fond():
+    """Lit un à un les catalogues pas encore en cache ; s'arrête net si le quota du jour est atteint."""
     try:
-        lire_catalogues()
+        for c in catalogues.catalogues_en_cours():
+            catalogues.lire_avec_cache(c, lambda c: ia.lire_catalogue(c, catalogues.pages(c.id)))
+        lecture["erreur"] = None
         log.info("Catalogues de la semaine lus")
-    except Exception:
+    except ia.QuotaEpuise as e:
+        lecture["erreur"] = str(e)
+        log.warning("%s", e)
+    except Exception as e:
+        lecture["erreur"] = f"Lecture des catalogues interrompue : {e}"[:300]
         log.exception("Lecture des catalogues en arrière-plan impossible")
+    finally:
+        lecture["en_cours"] = False
+
+
+def relancer_lecture():
+    if not lecture["en_cours"]:
+        lecture["en_cours"] = True
+        threading.Thread(target=lire_en_fond, daemon=True).start()
 
 
 @asynccontextmanager
 async def lifespan(app):
     # Les catalogues sont lus dès le lancement, pendant que l'utilisateur écrit ses besoins
-    threading.Thread(target=lire_en_fond, daemon=True).start()
+    relancer_lecture()
     yield
 
 
@@ -68,15 +79,17 @@ class PromosSemaine(BaseModel):
 
 @app.post("/api/promos-semaine")
 def promos_semaine() -> PromosSemaine:
-    """Promos de tous les catalogues en cours ; seuls les nouveaux catalogues sont lus par l'IA."""
-    offres = lire_catalogues()
-    return PromosSemaine(catalogues=catalogues.catalogues_en_cours(), offres=offres)
+    """Promos des catalogues déjà lus, sans attendre les autres : leur lecture continue en arrière-plan."""
+    lus = [c for c in catalogues.catalogues_en_cours() if catalogues.est_en_cache(c)]
+    relancer_lecture()
+    return PromosSemaine(catalogues=lus, offres=[o for c in lus for o in catalogues.offres_en_cache(c)])
 
 
 @app.get("/api/progression")
 def progression() -> dict:
     en_cours = catalogues.catalogues_en_cours()
-    return {"lus": sum(catalogues.est_en_cache(c) for c in en_cours), "total": len(en_cours)}
+    return {"lus": sum(catalogues.est_en_cache(c) for c in en_cours), "total": len(en_cours),
+            "en_cours": lecture["en_cours"], "erreur": lecture["erreur"]}
 
 
 @app.post("/api/panier")

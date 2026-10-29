@@ -35,6 +35,18 @@ class Extraction(BaseModel):
     offres: list[Offre]
 
 
+class PromoCatalogue(BaseModel):
+    """Format court pour lire un catalogue entier en une requête (le palier gratuit de Gemini est limité par jour)."""
+    produit: str
+    marque: str | None
+    promo: str = Field(description="Texte exact de la promo, ex. '2ème à -60%', '34% d'économies avec la carte'")
+    prix: float | None = Field(description="Prix affiché en €, null si absent")
+
+
+class LectureCatalogue(BaseModel):
+    promos: list[PromoCatalogue]
+
+
 class LignePanier(BaseModel):
     produit: str
     quantite: int
