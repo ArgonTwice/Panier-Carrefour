@@ -41,6 +41,11 @@
 <h2>3. Mes besoins</h2>
 <textarea id="besoins" rows="5" placeholder="Un besoin par ligne : lait, pâtes, lessive…"></textarea>
 <p><label>Budget (€) <input type="number" id="budget" min="0" step="1"></label></p>
+<p><label>Ce que j'achète d'habitude <span class="muted">(l'appli propose d'en stocker quand c'est au plus bas)</span>
+<textarea id="habituels" rows="4" placeholder="Café, pâtes, papier toilette, lessive…"></textarea></label></p>
+<p><label>Déjà en stock à la maison <span class="muted">(ne sera pas reproposé)</span>
+<textarea id="stock" rows="3" placeholder="Riz, huile…"></textarea></label></p>
+<p id="historique" class="muted"></p>
 
 <h2>4. Mon panier</h2>
 <button id="btn-panier">Composer le panier</button>
@@ -48,20 +53,20 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const etat = { offres: [], solde_cagnotte: null };
+const etat = { offres: [], solde_cagnotte: null, historique: [] };
+const CHAMPS = ["besoins", "budget", "habituels", "stock"];
+const lignes = (id) => $(id).value.split("\n").map((s) => s.trim()).filter(Boolean);
 
 function charger() {
   try {
     Object.assign(etat, JSON.parse(localStorage.getItem("etat") || "{}"));
-    $("besoins").value = localStorage.getItem("besoins") || "";
-    $("budget").value = localStorage.getItem("budget") || "";
+    for (const c of CHAMPS) $(c).value = localStorage.getItem(c) || "";
   } catch {}
 }
 function sauver() {
   try {
     localStorage.setItem("etat", JSON.stringify(etat));
-    localStorage.setItem("besoins", $("besoins").value);
-    localStorage.setItem("budget", $("budget").value);
+    for (const c of CHAMPS) localStorage.setItem(c, $(c).value);
   } catch {}
 }
 function esc(s) { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
@@ -94,8 +99,27 @@ function afficherOffres() {
   }).join("");
 }
 
+function afficherHistorique() {
+  const n = etat.historique.length;
+  $("historique").textContent = n ? `Historique : ${n} prix relevés, pour repérer les vraies bonnes affaires.` : "";
+}
+
+// Garde le prix de chaque offre lue pour comparer d'un catalogue à l'autre
+function releverPrix(offres) {
+  const vus = new Set(etat.historique.map((r) => [r.produit, r.marque, r.prix, r.date_fin].join("|")));
+  for (const o of offres) {
+    if (o.prix_euros == null) continue;
+    const r = { produit: o.produit, marque: o.marque, prix: o.prix_euros, date_fin: o.date_fin };
+    const k = [r.produit, r.marque, r.prix, r.date_fin].join("|");
+    if (!vus.has(k)) { vus.add(k); etat.historique.push(r); }
+  }
+  etat.historique = etat.historique.slice(-5000);
+  afficherHistorique();
+}
+
 function ajouterOffres(data) {
   etat.offres.push(...data.offres);
+  releverPrix(data.offres);
   if (data.solde_cagnotte != null) etat.solde_cagnotte = data.solde_cagnotte;
   sauver(); afficherOffres();
 }
@@ -150,14 +174,17 @@ $("offres").onclick = (e) => {
 };
 
 $("btn-vider").onclick = () => { etat.offres = []; etat.solde_cagnotte = null; sauver(); afficherOffres(); };
-$("besoins").oninput = $("budget").oninput = sauver;
+for (const c of CHAMPS) $(c).oninput = sauver;
 
 $("btn-panier").onclick = async () => {
   const p = await appel("/api/panier", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      besoins: $("besoins").value.split("\n").map((s) => s.trim()).filter(Boolean),
+      besoins: lignes("besoins"),
+      habituels: lignes("habituels"),
+      stock: lignes("stock"),
+      historique: etat.historique,
       budget: $("budget").value ? +$("budget").value : null,
       offres: etat.offres,
       solde_cagnotte: etat.solde_cagnotte,
@@ -177,7 +204,7 @@ $("btn-panier").onclick = async () => {
     ${p.offres_ecartees.length ? `<details><summary class="muted">Offres écartées (${p.offres_ecartees.length})</summary><ul>${p.offres_ecartees.map((o) => `<li class="muted">${esc(o)}</li>`).join("")}</ul></details>` : ""}`;
 };
 
-charger(); afficherOffres();
+charger(); afficherOffres(); afficherHistorique();
 </script>
 </body>
 </html>

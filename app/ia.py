@@ -1,3 +1,4 @@
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 
@@ -6,6 +7,7 @@ from google.genai import types
 
 from .avantages import AVANTAGES_PASS
 from .catalogues import Catalogue
+from .historique import annoter
 from .models import DemandePanier, Extraction, Panier, PropositionPanier
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
@@ -33,7 +35,9 @@ N'invente rien : un champ illisible ou absent vaut null."""
 
 PROMPT_PANIER = """Tu composes le panier de courses Carrefour de la semaine pour un client qui a la carte PASS et le Club Carrefour.
 
-Besoins : {besoins}
+Besoins de la semaine : {besoins}
+Produits achetés habituellement : {habituels}
+Déjà en stock à la maison : {stock}
 Budget : {budget}
 Cagnotte disponible : {cagnotte}
 
@@ -50,7 +54,12 @@ Règles :
 - Challenges : pour chacun, calcule ce qu'il reste à acheter avant le prochain palier (achat_euros - deja_achete).
   Pousse un challenge seulement si les produits sont utiles ou se conservent et que le gain du palier vaut le surcoût.
   Les gains de challenge arrivent dans la cagnotte le mois suivant.
-- Ajoute une opportunité hors besoins seulement si l'économie est forte et le produit se conserve.
+- Produits habituels absents des besoins : propose d'en faire le stock seulement s'ils se conservent et sont à un très
+  bon prix. Ne propose rien de ce qui est déjà en stock, sauf affaire exceptionnelle sur un produit qui se conserve.
+- prix_deja_vus donne les prix relevés pour ce produit dans les catalogues précédents. Si le prix actuel est au-dessus
+  du min déjà vu, ce n'est pas une vraie bonne affaire : achète seulement le nécessaire et dis-le dans la raison.
+  S'il est au niveau du min ou en dessous, c'est le bon moment pour faire le stock d'un produit qui se conserve.
+- Ajoute une opportunité hors besoins et hors habituels seulement si l'économie est forte et le produit se conserve.
 - Une promo n'est pas rentable si elle pousse à acheter plus que nécessaire pour un produit périssable.
 - Dans economie_estimee, compte aussi ce qui est crédité en cagnotte, et précise-le dans la raison.
 - Les prix sont des estimations : mets null si tu n'as aucune base pour estimer."""
@@ -89,9 +98,11 @@ def composer_panier(demande: DemandePanier) -> Panier:
     offres = demande.offres + (AVANTAGES_PASS if demande.carte_pass else [])
     prompt = PROMPT_PANIER.format(
         besoins=", ".join(demande.besoins) or "aucun précisé",
+        habituels=", ".join(demande.habituels) or "non précisés",
+        stock=", ".join(demande.stock) or "non précisé",
         budget=f"{demande.budget} €" if demande.budget else "non précisé",
         cagnotte=f"{demande.solde_cagnotte} €" if demande.solde_cagnotte else "inconnue",
-        offres="[" + ",".join(o.model_dump_json(exclude_defaults=True) for o in offres) + "]",
+        offres=json.dumps([annoter(o, demande.historique) for o in offres], ensure_ascii=False),
     )
     return totaliser(_parse(prompt, PropositionPanier), demande.budget)
 

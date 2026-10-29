@@ -57,9 +57,19 @@ class Panier(PropositionPanier):
     hors_budget: bool
 
 
+class Releve(BaseModel):
+    produit: str
+    marque: str | None = None
+    prix: float
+    date_fin: str | None = None
+
+
 class DemandePanier(BaseModel):
     besoins: list[str]
     budget: float | None = None
     offres: list[Offre]
     solde_cagnotte: float | None = None
     carte_pass: bool = True
+    habituels: list[str] = []
+    stock: list[str] = []
+    historique: list[Releve] = []

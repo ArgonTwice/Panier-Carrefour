@@ -11,7 +11,7 @@ Il n'y a aucune connexion au compte Carrefour et aucun identifiant n'est stocké
 2. Tu saisis tes besoins de la semaine et ton budget.
 3. Gemini compose le panier. Les totaux sont recalculés côté serveur.
 
-Les avantages permanents de la carte PASS (fruits et légumes, Carrefour Bio, mercredis frais, jeudis bébé…) sont ajoutés d'office au calcul, voir `app/avantages.py`. Les offres, les besoins et le budget restent dans le navigateur (localStorage).
+Les avantages permanents de la carte PASS (fruits et légumes, Carrefour Bio, mercredis frais, jeudis bébé…) sont ajoutés d'office au calcul, voir `app/avantages.py`. Chaque prix lu est gardé dans un historique : au calcul du panier, l'IA voit le prix le plus bas déjà relevé pour chaque produit, repère les fausses promos et conseille de faire le stock des produits habituels quand ils sont au plus bas, en tenant compte de ce qui est déjà à la maison. Les offres, l'historique, les besoins et le budget restent dans le navigateur (localStorage).
 
 ## Lancer
 

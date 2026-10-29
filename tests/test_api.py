@@ -2,8 +2,8 @@ from datetime import date
 
 from fastapi.testclient import TestClient
 
-from app import catalogues, ia, main
-from app.models import DemandePanier, Extraction, LignePanier, Offre, PropositionPanier
+from app import catalogues, historique, ia, main
+from app.models import DemandePanier, Extraction, LignePanier, Offre, PropositionPanier, Releve
 
 client = TestClient(main.app)
 
@@ -133,3 +133,29 @@ def test_panier_ajoute_les_avantages_pass(monkeypatch):
     ia.composer_panier(DemandePanier(besoins=["pommes"], offres=[OFFRE]))
     ia.composer_panier(DemandePanier(besoins=["pommes"], offres=[OFFRE], carte_pass=False))
     assert "Fruits et légumes" in prompts[0] and "Fruits et légumes" not in prompts[1]
+
+
+def test_cle_produit_ignore_accents_et_casse():
+    assert historique.cle("Café moulu", "Carte Noire") == historique.cle("CAFE  MOULU", "carte noire")
+
+
+def test_annoter_prix_deja_vus_hors_meme_catalogue():
+    offre = OFFRE.model_copy(update={"prix_euros": 5.0})
+    releves = [
+        Releve(produit="lessive", marque="x", prix=4.0, date_fin="2026-10-01"),
+        Releve(produit="Lessive", marque="X", prix=6.0, date_fin="2026-10-15"),
+        Releve(produit="Lessive", marque="X", prix=5.0, date_fin=OFFRE.date_fin),
+        Releve(produit="Savon", marque="X", prix=1.0, date_fin="2026-10-01"),
+    ]
+    assert historique.annoter(offre, releves)["prix_deja_vus"] == {"min": 4.0, "moyenne": 5.0, "releves": 2}
+    assert "prix_deja_vus" not in historique.annoter(OFFRE, releves)
+
+
+def test_panier_transmet_stock_habituels_et_historique(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(ia, "_parse", lambda content, fmt: prompts.append(content) or PropositionPanier(
+        lignes=[], a_faire=[], offres_ecartees=[]))
+    offre = OFFRE.model_copy(update={"prix_euros": 5.0})
+    ia.composer_panier(DemandePanier(besoins=[], offres=[offre], habituels=["café"], stock=["riz"],
+                                     historique=[Releve(produit="Lessive", marque="X", prix=3.5, date_fin="2026-09-01")]))
+    assert "café" in prompts[0] and "riz" in prompts[0] and '"min": 3.5' in prompts[0]
