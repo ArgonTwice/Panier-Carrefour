@@ -4,25 +4,22 @@ Appli perso qui compose un panier de courses optimisé à partir des promos, bon
 
 Il n'y a aucune connexion au compte Carrefour et aucun identifiant n'est stocké. Les offres perso sont lues sur des **captures d'écran** de l'appli Carrefour.
 
-## Fonctionnement
+## Utilisation
 
-0. Les catalogues Carrefour en cours sont listés depuis promocatalogues.fr. Un clic sur « Lire » télécharge les pages et Gemini en extrait les promos.
-1. Tu importes 2 à 4 captures (bons, challenges, cagnotte, promos). Gemini en extrait les offres.
-2. Tu saisis tes besoins de la semaine et ton budget.
-3. Gemini compose le panier. Les totaux sont recalculés côté serveur.
+**Windows :** double-clic sur `lancer.bat`. La première fois, il installe tout et ouvre le Bloc-notes pour coller la clé Gemini (https://aistudio.google.com/apikey). Ensuite, il met l'appli à jour et l'ouvre dans le navigateur.
+**Mac / Linux :** `./lancer.sh`.
 
-Les avantages permanents de la carte PASS (fruits et légumes, Carrefour Bio, mercredis frais, jeudis bébé…) sont ajoutés d'office au calcul, voir `app/avantages.py`. Chaque prix lu est gardé dans un historique : au calcul du panier, l'IA voit le prix le plus bas déjà relevé pour chaque produit, repère les fausses promos et conseille de faire le stock des produits habituels quand ils sont au plus bas, en tenant compte de ce qui est déjà à la maison. Les offres, l'historique, les besoins et le budget restent dans le navigateur (localStorage).
+Dans l'appli :
+1. Écris tes besoins, puis clique sur **Préparer mon panier**. Les catalogues Carrefour de la semaine (promocatalogues.fr) sont lus par Gemini, une seule fois chacun (cache dans `data/`), puis le panier est composé.
+2. Quand tes bons ou tes challenges changent, choisis tes captures de l'appli Carrefour : elles sont analysées tout de suite, une offre recapturée remplace l'ancienne et les offres expirées disparaissent toutes seules.
 
-## Lancer
+Le calcul tient compte :
+- des avantages permanents de la carte PASS (`app/avantages.py`) ;
+- de la progression des Challenge Fid' (reste à acheter, rendement du prochain palier) ;
+- de l'historique des prix relevés, pour repérer les fausses promos ;
+- de ta liste habituelle et de ton stock (dans « Mes habitudes »).
 
-```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install -r requirements-dev.txt
-cp .env.example .env   # puis colle ta clé (https://aistudio.google.com/apikey) dans .env
-uvicorn app.main:app --reload --env-file .env
-```
-
-Puis ouvre http://127.0.0.1:8000.
+Il te dit quand et où commander, et sépare l'économie en caisse de celle en cagnotte. Tout l'état perso reste dans le navigateur (localStorage).
 
 ## Tests
 

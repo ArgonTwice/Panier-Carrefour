@@ -71,7 +71,7 @@ def test_extraire_offres_appelle_gemini(monkeypatch):
             appel.update(model=model, contents=contents, config=config)
             return type("R", (), {"text": Extraction(solde_cagnotte=None, offres=[OFFRE]).model_dump_json()})()
 
-    monkeypatch.setattr(ia.genai, "Client", lambda: type("C", (), {"models": FauxModels()})())
+    monkeypatch.setattr(ia.genai, "Client", lambda **kw: type("C", (), {"models": FauxModels()})())
     extraction = ia.extraire_offres([(b"img", "image/png")])
     assert extraction.offres == [OFFRE]
     assert appel["config"].response_schema is Extraction
@@ -178,3 +178,28 @@ def test_totaliser_separe_la_cagnotte():
     lignes = [ligne(5, 2).model_copy(update={"dont_cagnotte": 0.75}), ligne(3, 1)]
     p = ia.totaliser(PropositionPanier(lignes=lignes, a_faire=[], offres_ecartees=[]), None)
     assert (p.economie_totale, p.economie_cagnotte) == (3, 0.75)
+
+
+def test_lire_avec_cache_ne_lit_qu_une_fois(monkeypatch, tmp_path):
+    monkeypatch.setattr(catalogues, "CACHE", tmp_path)
+    appels = []
+    cat = catalogues.Catalogue(id=42, titre="T", debut=None, fin=None, couverture="")
+
+    def lire(c):
+        appels.append(c.id)
+        return Extraction(solde_cagnotte=None, offres=[OFFRE])
+
+    assert catalogues.lire_avec_cache(cat, lire) == [OFFRE]
+    assert catalogues.lire_avec_cache(cat, lire) == [OFFRE]
+    assert appels == [42]
+
+
+def test_promos_semaine(monkeypatch, tmp_path):
+    monkeypatch.setattr(catalogues, "CACHE", tmp_path)
+    cats = [catalogues.Catalogue(id=i, titre="T", debut=None, fin=None, couverture="") for i in (1, 2)]
+    monkeypatch.setattr(catalogues, "catalogues_en_cours", lambda: cats)
+    monkeypatch.setattr(catalogues, "pages", lambda i: [])
+    monkeypatch.setattr(ia, "lire_catalogue", lambda c, pages: Extraction(solde_cagnotte=None, offres=[OFFRE]))
+    r = client.post("/api/promos-semaine")
+    assert r.status_code == 200
+    assert len(r.json()["catalogues"]) == 2 and len(r.json()["offres"]) == 2

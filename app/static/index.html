@@ -18,6 +18,7 @@
   .muted { color: var(--muted); font-size: .9rem; }
   .eco { color: var(--ok); font-weight: 600; }
   .err { color: var(--warn); }
+  .grand { width: 100%; padding: 14px; font-size: 1.1rem; }
   #statut { position: sticky; top: 0; background: var(--bg); margin: 0; padding: 4px 0; }
   .x { background: none; color: var(--muted); padding: 0 6px; float: right; }
 </style>
@@ -26,30 +27,28 @@
 <h1>Panier Carrefour</h1>
 <p id="statut"></p>
 
-<h2>1. Catalogues de la semaine</h2>
-<p class="muted">Lus automatiquement par l'IA (compte 1 à 3 minutes par catalogue).</p>
-<p><button id="btn-catalogues">Voir les catalogues en cours</button></p>
-<ul id="catalogues"></ul>
+<textarea id="besoins" rows="4" placeholder="Mes besoins de la semaine, un par ligne : lait, pâtes, lessive…"></textarea>
+<p><label>Budget (€) <input type="number" id="budget" min="0" step="1"></label></p>
+<p><button id="btn-panier" class="grand">🛒 Préparer mon panier</button></p>
+<p class="muted">Lit tout seul les catalogues de la semaine, puis compose le panier avec tes offres perso.</p>
+<div id="panier"></div>
 
-<h2>2. Mes offres perso</h2>
-<p class="muted">Ajoute tes captures de l'appli Carrefour : bons, challenges, cagnotte, promos.</p>
+<h2>Mes offres perso</h2>
+<p class="muted">Quand tes bons ou challenges changent, choisis tes captures de l'appli Carrefour : elles sont analysées tout de suite.
+Les offres expirées disparaissent toutes seules.</p>
 <input type="file" id="captures" accept="image/*" multiple>
-<p><button id="btn-extraire">Analyser les captures</button> <button id="btn-vider" class="x">Tout effacer</button></p>
 <p id="cagnotte" class="muted"></p>
 <ul id="offres"></ul>
+<p><button id="btn-vider" class="x" style="float:none">Tout effacer</button></p>
 
-<h2>3. Mes besoins</h2>
-<textarea id="besoins" rows="5" placeholder="Un besoin par ligne : lait, pâtes, lessive…"></textarea>
-<p><label>Budget (€) <input type="number" id="budget" min="0" step="1"></label></p>
+<details>
+<summary><strong>Mes habitudes</strong></summary>
 <p><label>Ce que j'achète d'habitude <span class="muted">(l'appli propose d'en stocker quand c'est au plus bas)</span>
 <textarea id="habituels" rows="4" placeholder="Café, pâtes, papier toilette, lessive…"></textarea></label></p>
 <p><label>Déjà en stock à la maison <span class="muted">(ne sera pas reproposé)</span>
 <textarea id="stock" rows="3" placeholder="Riz, huile…"></textarea></label></p>
 <p id="historique" class="muted"></p>
-
-<h2>4. Mon panier</h2>
-<button id="btn-panier">Composer le panier</button>
-<div id="panier"></div>
+</details>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -123,15 +122,24 @@ function releverPrix(offres) {
   afficherHistorique();
 }
 
+const cleOffre = (o) => [o.type, o.produit, o.marque, o.remise_texte].join("|").toLowerCase();
+
+// Une offre recapturée remplace l'ancienne (ex. progression d'un challenge mise à jour)
 function ajouterOffres(data) {
-  etat.offres.push(...data.offres);
+  const nouvelles = new Set(data.offres.map(cleOffre));
+  etat.offres = etat.offres.filter((o) => !nouvelles.has(cleOffre(o))).concat(data.offres);
   releverPrix(data.offres);
   if (data.solde_cagnotte != null) etat.solde_cagnotte = data.solde_cagnotte;
   sauver(); afficherOffres();
 }
 
-async function appel(url, options) {
-  $("statut").textContent = "Analyse en cours…";
+function purgerExpirees() {
+  const aujourdhui = new Date().toISOString().slice(0, 10);
+  etat.offres = etat.offres.filter((o) => !o.date_fin || o.date_fin >= aujourdhui);
+}
+
+async function appel(url, options, message = "Analyse en cours…") {
+  $("statut").textContent = message;
   $("statut").className = "muted";
   try {
     const r = await fetch(url, options);
@@ -146,31 +154,13 @@ async function appel(url, options) {
   }
 }
 
-$("btn-extraire").onclick = async () => {
+$("captures").onchange = async () => {
   const fichiers = $("captures").files;
   if (!fichiers.length) return;
   const fd = new FormData();
   for (const f of fichiers) fd.append("captures", f);
-  ajouterOffres(await appel("/api/extraction", { method: "POST", body: fd }));
-  $("captures").value = "";
-};
-
-$("btn-catalogues").onclick = async () => {
-  const liste = await appel("/api/catalogues");
-  $("catalogues").innerHTML = liste.map((c) => `
-    <li><button class="x" data-lire="${c.id}">Lire</button>
-      <strong>${esc(c.titre)}</strong>
-      <div class="muted">${c.debut ? `du ${c.debut} au ${c.fin}` : ""}</div></li>`).join("");
-};
-
-$("catalogues").onclick = async (e) => {
-  const id = e.target.dataset.lire;
-  if (!id) return;
-  e.target.disabled = true;
-  try {
-    ajouterOffres(await appel(`/api/catalogues/${id}/lecture`, { method: "POST" }));
-    e.target.textContent = "Lu ✓";
-  } catch { e.target.disabled = false; }
+  try { ajouterOffres(await appel("/api/extraction", { method: "POST", body: fd }, "Lecture de tes captures…")); }
+  finally { $("captures").value = ""; }
 };
 
 $("offres").onclick = (e) => {
@@ -183,6 +173,15 @@ $("btn-vider").onclick = () => { etat.offres = []; etat.solde_cagnotte = null; s
 for (const c of CHAMPS) $(c).oninput = sauver;
 
 $("btn-panier").onclick = async () => {
+  $("btn-panier").disabled = true;
+  try { await preparer(); } finally { $("btn-panier").disabled = false; }
+};
+
+async function preparer() {
+  const semaine = await appel("/api/promos-semaine", { method: "POST" },
+    "Lecture des catalogues de la semaine… (quelques minutes la première fois, instantané ensuite)");
+  releverPrix(semaine.offres);
+  sauver();
   const p = await appel("/api/panier", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -192,10 +191,10 @@ $("btn-panier").onclick = async () => {
       stock: lignes("stock"),
       historique: etat.historique,
       budget: $("budget").value ? +$("budget").value : null,
-      offres: etat.offres,
+      offres: [...etat.offres, ...semaine.offres],
       solde_cagnotte: etat.solde_cagnotte,
     }),
-  });
+  }, `Composition du panier avec ${semaine.offres.length} promos de ${semaine.catalogues.length} catalogues…`);
   $("panier").innerHTML = `
     <p><strong>Total estimé : ${p.total_estime} €</strong> · <span class="eco">Économie : ${p.economie_totale} €</span>
     ${p.economie_cagnotte ? `<br><span class="muted">dont ${p.economie_cagnotte} € en cagnotte, ${(p.economie_totale - p.economie_cagnotte).toFixed(2)} € en caisse</span>` : ""}
@@ -210,9 +209,9 @@ $("btn-panier").onclick = async () => {
         <div class="muted">${esc(l.raison)}${l.offres_utilisees.length ? " · " + l.offres_utilisees.map(esc).join(", ") : ""}</div>
       </li>`).join("")}</ul>
     ${p.offres_ecartees.length ? `<details><summary class="muted">Offres écartées (${p.offres_ecartees.length})</summary><ul>${p.offres_ecartees.map((o) => `<li class="muted">${esc(o)}</li>`).join("")}</ul></details>` : ""}`;
-};
+}
 
-charger(); afficherOffres(); afficherHistorique();
+charger(); purgerExpirees(); sauver(); afficherOffres(); afficherHistorique();
 </script>
 </body>
 </html>

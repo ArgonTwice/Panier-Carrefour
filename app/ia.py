@@ -11,6 +11,9 @@ from .historique import annoter
 from .models import DemandePanier, Extraction, Panier, PropositionPanier
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+# Le palier gratuit limite les requêtes par minute : on réessaie au lieu d'échouer
+RETRY = types.HttpOptions(retry_options=types.HttpRetryOptions(
+    attempts=6, initial_delay=5, max_delay=60, http_status_codes=[429, 500, 503]))
 
 PROMPT_EXTRACTION = """Ces captures viennent de l'appli Carrefour d'un client qui a la carte PASS et le Club Carrefour.
 Liste chaque offre visible, une seule fois même si elle apparaît sur plusieurs captures.
@@ -71,7 +74,7 @@ Règles :
 
 def _parse(contents, schema):
     # Clé lue dans GEMINI_API_KEY par le SDK
-    reponse = genai.Client().models.generate_content(
+    reponse = genai.Client(http_options=RETRY).models.generate_content(
         model=MODEL,
         contents=contents,
         config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema),

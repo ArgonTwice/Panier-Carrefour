@@ -2,9 +2,12 @@
 import json
 import re
 from datetime import date, datetime
+from pathlib import Path
 
 import httpx
 from pydantic import BaseModel
+
+from .models import Extraction, Offre
 
 SITE = "https://www.promocatalogues.fr"
 CDN = "https://img.offers-cdn.net"
@@ -12,6 +15,7 @@ LISTE = f"{SITE}/magasins/carrefour/catalogues-promotions"
 # Catalogues hors courses alimentaires ou d'autres régions, inutiles pour le Carrefour de Givors (hyper, Rhône).
 # promocatalogues.fr ne filtre pas par magasin : la page de Givors liste les mêmes catalogues que la liste nationale.
 EXCLUS = ("bretagne", "alsace", "bredele", "jouets", "voyages", "energies", "tex ", "culture", "sorties")
+CACHE = Path(__file__).parent.parent / "data" / "catalogues"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"}
 
 
@@ -75,3 +79,14 @@ def catalogues_en_cours(aujourdhui: date | None = None) -> list[Catalogue]:
 def pages(catalogue_id: int) -> list[tuple[bytes, str]]:
     html = _get(f"{SITE}/regardez/offres/catalogue-carrefour-{catalogue_id}").text
     return [(_get(url).content, "image/jpeg") for url in parser_pages(html)]
+
+
+def lire_avec_cache(catalogue: Catalogue, lire) -> list[Offre]:
+    """Un catalogue ne change pas : on ne le fait lire qu'une fois par l'IA (lire(catalogue) -> Extraction)."""
+    fichier = CACHE / f"{catalogue.id}.json"
+    if fichier.exists():
+        return Extraction.model_validate_json(fichier.read_text()).offres
+    extraction = lire(catalogue)
+    CACHE.mkdir(parents=True, exist_ok=True)
+    fichier.write_text(extraction.model_dump_json())
+    return extraction.offres
