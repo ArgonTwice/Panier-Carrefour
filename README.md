@@ -17,9 +17,8 @@ Les offres, les besoins et le budget restent dans le navigateur (localStorage).
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements-dev.txt
-export GEMINI_API_KEY=...   # clé sur https://aistudio.google.com/apikey
-# optionnel : export GEMINI_MODEL=gemini-flash-latest
-uvicorn app.main:app --reload
+cp .env.example .env   # puis colle ta clé (https://aistudio.google.com/apikey) dans .env
+uvicorn app.main:app --reload --env-file .env
 ```
 
 Puis ouvre http://127.0.0.1:8000.
