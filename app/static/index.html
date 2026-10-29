@@ -73,12 +73,18 @@ function esc(s) { const d = document.createElement("div"); d.textContent = s ?? 
 
 const LIBELLES = { bon: "Bons", challenge: "Challenges", avantage: "Avantages", promo: "Promos" };
 
+function prochainPalier(o) {
+  const deja = o.deja_achete || 0;
+  const p = (o.paliers || []).slice().sort((a, b) => a.achat_euros - b.achat_euros).find((p) => p.achat_euros > deja);
+  return p ? `reste ${(p.achat_euros - deja).toFixed(2)} € pour gagner ${p.gain_euros} €` : "";
+}
+
 function details(o) {
   const paliers = (o.paliers || []).map((p) => `${p.achat_euros} € → ${p.gain_euros} €`).join(", ");
   return [
     o.active === false ? "à activer" : o.active ? "activé" : "",
     o.deja_achete != null ? `déjà ${o.deja_achete} € d'achats` : "",
-    paliers, o.canal && o.canal !== "tous" ? o.canal : "", o.jour, o.conditions,
+    paliers, prochainPalier(o), o.canal && o.canal !== "tous" ? o.canal : "", o.jour, o.conditions,
     o.seuil_achat ? `dès ${o.seuil_achat} €` : "", o.date_fin ? `jusqu'au ${o.date_fin}` : "",
   ].filter(Boolean).map(esc).join(" · ");
 }
@@ -192,7 +198,9 @@ $("btn-panier").onclick = async () => {
   });
   $("panier").innerHTML = `
     <p><strong>Total estimé : ${p.total_estime} €</strong> · <span class="eco">Économie : ${p.economie_totale} €</span>
+    ${p.economie_cagnotte ? `<br><span class="muted">dont ${p.economie_cagnotte} € en cagnotte, ${(p.economie_totale - p.economie_cagnotte).toFixed(2)} € en caisse</span>` : ""}
     ${p.hors_budget ? '<br><span class="err">Dépasse le budget</span>' : ""}</p>
+    ${p.quand_commander ? `<p>🗓️ ${esc(p.quand_commander)}</p>` : ""}
     ${p.a_faire.length ? `<h2>À faire avant les courses</h2><ul>${p.a_faire.map((a) => `<li>☐ ${esc(a)}</li>`).join("")}</ul>` : ""}
     <h2>Liste</h2>
     <ul>${p.lignes.map((l) => `

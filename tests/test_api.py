@@ -159,3 +159,22 @@ def test_panier_transmet_stock_habituels_et_historique(monkeypatch):
     ia.composer_panier(DemandePanier(besoins=[], offres=[offre], habituels=["café"], stock=["riz"],
                                      historique=[Releve(produit="Lessive", marque="X", prix=3.5, date_fin="2026-09-01")]))
     assert "café" in prompts[0] and "riz" in prompts[0] and '"min": 3.5' in prompts[0]
+
+
+def test_progression_challenge():
+    from app.models import Palier
+    challenge = Offre(type="challenge", produit="Carrefour Expert", marque=None, remise_texte="Challenge Fid'",
+                      remise_euros=None, seuil_achat=None, conditions=None, date_fin=None, deja_achete=0.79,
+                      paliers=[Palier(achat_euros=3, gain_euros=0.5), Palier(achat_euros=5, gain_euros=1),
+                               Palier(achat_euros=7, gain_euros=1.8)])
+    assert historique.progression(challenge) == {
+        "gain_acquis": 0, "reste_a_acheter": 2.21, "gain_au_prochain_palier": 0.5, "rendement_pct": 23}
+    fini = challenge.model_copy(update={"deja_achete": 7.5})
+    assert historique.progression(fini) == {"gain_acquis": 1.8, "termine": True}
+    assert historique.progression(OFFRE) is None
+
+
+def test_totaliser_separe_la_cagnotte():
+    lignes = [ligne(5, 2).model_copy(update={"dont_cagnotte": 0.75}), ligne(3, 1)]
+    p = ia.totaliser(PropositionPanier(lignes=lignes, a_faire=[], offres_ecartees=[]), None)
+    assert (p.economie_totale, p.economie_cagnotte) == (3, 0.75)

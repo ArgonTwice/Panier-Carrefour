@@ -51,9 +51,13 @@ Règles :
 - Respecte la quantité requise, les seuils d'achat, le canal (magasin ou drive) et le jour imposé par chaque offre.
   Si une offre impose un jour (ex. mercredi en drive), dis-le dans a_faire.
 - Bons et challenges dont active=false : s'ils servent au panier, ajoute dans a_faire de les activer.
-- Challenges : pour chacun, calcule ce qu'il reste à acheter avant le prochain palier (achat_euros - deja_achete).
-  Pousse un challenge seulement si les produits sont utiles ou se conservent et que le gain du palier vaut le surcoût.
-  Les gains de challenge arrivent dans la cagnotte le mois suivant.
+- Challenges : "progression" donne le reste à acheter avant le prochain palier et son rendement (rendement_pct = part
+  du reste rendue en cagnotte). Un rendement de 20 % ou plus sur des produits utiles ou qui se conservent vaut le coup ;
+  en dessous, ne pousse le challenge que si les achats étaient prévus. Les gains arrivent en cagnotte le mois suivant.
+  Dans a_faire, indique pour chaque challenge à jouer le montant restant et le gain visé.
+- Jour et canal : dans quand_commander, conseille quand et où faire les courses (magasin, ou drive un jour précis
+  pour profiter d'une offre liée au jour). Si le panier gagne à être coupé en deux (ex. frais le mercredi en drive),
+  dis-le, et ne le propose que si le gain dépasse quelques euros.
 - Produits habituels absents des besoins : propose d'en faire le stock seulement s'ils se conservent et sont à un très
   bon prix. Ne propose rien de ce qui est déjà en stock, sauf affaire exceptionnelle sur un produit qui se conserve.
 - prix_deja_vus donne les prix relevés pour ce produit dans les catalogues précédents. Si le prix actuel est au-dessus
@@ -61,7 +65,7 @@ Règles :
   S'il est au niveau du min ou en dessous, c'est le bon moment pour faire le stock d'un produit qui se conserve.
 - Ajoute une opportunité hors besoins et hors habituels seulement si l'économie est forte et le produit se conserve.
 - Une promo n'est pas rentable si elle pousse à acheter plus que nécessaire pour un produit périssable.
-- Dans economie_estimee, compte aussi ce qui est crédité en cagnotte, et précise-le dans la raison.
+- Dans economie_estimee, compte aussi ce qui est crédité en cagnotte, et mets cette part dans dont_cagnotte.
 - Les prix sont des estimations : mets null si tu n'as aucune base pour estimer."""
 
 
@@ -114,5 +118,6 @@ def totaliser(proposition: PropositionPanier, budget: float | None) -> Panier:
         **proposition.model_dump(),
         total_estime=total,
         economie_totale=round(sum(l.economie_estimee for l in proposition.lignes), 2),
+        economie_cagnotte=round(sum(min(l.dont_cagnotte, l.economie_estimee) for l in proposition.lignes), 2),
         hors_budget=budget is not None and total > budget,
     )

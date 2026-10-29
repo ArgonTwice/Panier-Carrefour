@@ -40,12 +40,14 @@ class LignePanier(BaseModel):
     quantite: int
     prix_estime: float | None = Field(description="Prix total estimé de la ligne en €, après remise")
     economie_estimee: float = Field(description="Économie estimée en € pour la ligne, 0 si aucune")
+    dont_cagnotte: float = Field(default=0, description="Part de economie_estimee créditée en cagnotte, en €")
     offres_utilisees: list[str] = Field(description="remise_texte des offres utilisées")
     besoin: bool = Field(description="true si la ligne répond à un besoin listé, false si c'est une opportunité")
     raison: str
 
 
 class PropositionPanier(BaseModel):
+    quand_commander: str = Field(default="", description="Jour et canal conseillés (magasin, drive), avec la raison")
     lignes: list[LignePanier]
     a_faire: list[str] = Field(description="Actions avant les courses : bons à activer, challenges à valider")
     offres_ecartees: list[str] = Field(description="Offres jugées pas rentables, avec la raison en quelques mots")
@@ -54,6 +56,7 @@ class PropositionPanier(BaseModel):
 class Panier(PropositionPanier):
     total_estime: float
     economie_totale: float
+    economie_cagnotte: float
     hors_budget: bool
 
 
