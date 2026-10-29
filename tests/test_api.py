@@ -101,6 +101,12 @@ def test_catalogues_en_cours_ecarte_les_expires(monkeypatch):
     assert [c.id for c in catalogues.catalogues_en_cours(date(2026, 10, 29))] == [42]
 
 
+def test_catalogues_en_cours_ecarte_les_hors_sujet(monkeypatch):
+    html = LISTE_HTML.replace("vos-promos", "bretagne")
+    monkeypatch.setattr(catalogues, "_get", lambda url: type("R", (), {"text": html})())
+    assert catalogues.catalogues_en_cours(date(2026, 10, 25)) == []
+
+
 def test_parser_pages_catalogue():
     html = 'let flyerPages = [{"page":"\\/assets\\/uploads\\/flyers\\/42\\/%s\\/carrefour-1-a.jpeg"}];'
     assert catalogues.parser_pages(html) == ["https://img.offers-cdn.net/assets/uploads/flyers/42/large/carrefour-1-a.jpeg"]

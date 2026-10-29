@@ -9,6 +9,9 @@ from pydantic import BaseModel
 SITE = "https://www.promocatalogues.fr"
 CDN = "https://img.offers-cdn.net"
 LISTE = f"{SITE}/magasins/carrefour/catalogues-promotions"
+# Catalogues hors courses alimentaires ou d'autres régions, inutiles pour le Carrefour de Givors (hyper, Rhône).
+# promocatalogues.fr ne filtre pas par magasin : la page de Givors liste les mêmes catalogues que la liste nationale.
+EXCLUS = ("bretagne", "alsace", "bredele", "jouets", "voyages", "energies", "tex ", "culture", "sorties")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"}
 
 
@@ -63,7 +66,10 @@ def parser_pages(html: str) -> list[str]:
 
 def catalogues_en_cours(aujourdhui: date | None = None) -> list[Catalogue]:
     aujourdhui = aujourdhui or date.today()
-    return [c for c in parser_liste(_get(LISTE).text) if not c.fin or c.fin >= aujourdhui]
+    return [
+        c for c in parser_liste(_get(LISTE).text)
+        if (not c.fin or c.fin >= aujourdhui) and not any(mot in c.titre.lower() + " " for mot in EXCLUS)
+    ]
 
 
 def pages(catalogue_id: int) -> list[tuple[bytes, str]]:
