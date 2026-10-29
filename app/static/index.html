@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panier Carrefour</title>
+<style>
+  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --line: #ddd; --accent: #0a5cad; --ok: #1d7a3a; --warn: #b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161616; --fg: #eee; --muted: #999; --line: #333; --accent: #6aa8f0; --ok: #5cc27a; --warn: #f28b82; } }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; max-width: 640px; padding: 16px; font: 16px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 2rem; }
+  textarea, input { width: 100%; padding: 8px; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 6px; }
+  button { padding: 10px 16px; font: inherit; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  ul { padding-left: 0; list-style: none; }
+  li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .eco { color: var(--ok); font-weight: 600; }
+  .err { color: var(--warn); }
+  .x { background: none; color: var(--muted); padding: 0 6px; float: right; }
+</style>
+</head>
+<body>
+<h1>Panier Carrefour</h1>
+
+<h2>1. Mes offres</h2>
+<p class="muted">Ajoute tes captures de l'appli Carrefour : bons, challenges, cagnotte, promos.</p>
+<input type="file" id="captures" accept="image/*" multiple>
+<p><button id="btn-extraire">Analyser les captures</button> <button id="btn-vider" class="x">Tout effacer</button></p>
+<p id="cagnotte" class="muted"></p>
+<ul id="offres"></ul>
+
+<h2>2. Mes besoins</h2>
+<textarea id="besoins" rows="5" placeholder="Un besoin par ligne : lait, pâtes, lessive…"></textarea>
+<p><label>Budget (€) <input type="number" id="budget" min="0" step="1"></label></p>
+
+<h2>3. Mon panier</h2>
+<button id="btn-panier">Composer le panier</button>
+<p id="statut"></p>
+<div id="panier"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const etat = { offres: [], solde_cagnotte: null };
+
+function charger() {
+  try {
+    Object.assign(etat, JSON.parse(localStorage.getItem("etat") || "{}"));
+    $("besoins").value = localStorage.getItem("besoins") || "";
+    $("budget").value = localStorage.getItem("budget") || "";
+  } catch {}
+}
+function sauver() {
+  try {
+    localStorage.setItem("etat", JSON.stringify(etat));
+    localStorage.setItem("besoins", $("besoins").value);
+    localStorage.setItem("budget", $("budget").value);
+  } catch {}
+}
+function esc(s) { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
+
+function afficherOffres() {
+  $("cagnotte").textContent = etat.solde_cagnotte != null ? `Cagnotte : ${etat.solde_cagnotte} €` : "";
+  $("offres").innerHTML = etat.offres.map((o, i) => `
+    <li><button class="x" data-i="${i}" title="Retirer">✕</button>
+      <strong>${esc(o.produit)}</strong> ${o.marque ? "· " + esc(o.marque) : ""}<br>
+      ${esc(o.type)} · ${esc(o.remise_texte)}
+      <div class="muted">${[o.conditions, o.seuil_achat ? `dès ${o.seuil_achat} €` : "", o.date_fin ? `jusqu'au ${o.date_fin}` : ""].filter(Boolean).map(esc).join(" · ")}</div>
+    </li>`).join("") || '<li class="muted">Aucune offre pour l\'instant.</li>';
+}
+
+async function appel(url, options) {
+  $("statut").textContent = "Analyse en cours…";
+  $("statut").className = "muted";
+  try {
+    const r = await fetch(url, options);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || r.statusText);
+    $("statut").textContent = "";
+    return data;
+  } catch (e) {
+    $("statut").textContent = "Erreur : " + e.message;
+    $("statut").className = "err";
+    throw e;
+  }
+}
+
+$("btn-extraire").onclick = async () => {
+  const fichiers = $("captures").files;
+  if (!fichiers.length) return;
+  const fd = new FormData();
+  for (const f of fichiers) fd.append("captures", f);
+  const data = await appel("/api/extraction", { method: "POST", body: fd });
+  etat.offres.push(...data.offres);
+  if (data.solde_cagnotte != null) etat.solde_cagnotte = data.solde_cagnotte;
+  $("captures").value = "";
+  sauver(); afficherOffres();
+};
+
+$("offres").onclick = (e) => {
+  if (e.target.dataset.i === undefined) return;
+  etat.offres.splice(+e.target.dataset.i, 1);
+  sauver(); afficherOffres();
+};
+
+$("btn-vider").onclick = () => { etat.offres = []; etat.solde_cagnotte = null; sauver(); afficherOffres(); };
+$("besoins").oninput = $("budget").oninput = sauver;
+
+$("btn-panier").onclick = async () => {
+  const p = await appel("/api/panier", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      besoins: $("besoins").value.split("\n").map((s) => s.trim()).filter(Boolean),
+      budget: $("budget").value ? +$("budget").value : null,
+      offres: etat.offres,
+      solde_cagnotte: etat.solde_cagnotte,
+    }),
+  });
+  $("panier").innerHTML = `
+    <p><strong>Total estimé : ${p.total_estime} €</strong> · <span class="eco">Économie : ${p.economie_totale} €</span>
+    ${p.hors_budget ? '<br><span class="err">Dépasse le budget</span>' : ""}</p>
+    ${p.a_faire.length ? `<h2>À faire avant les courses</h2><ul>${p.a_faire.map((a) => `<li>☐ ${esc(a)}</li>`).join("")}</ul>` : ""}
+    <h2>Liste</h2>
+    <ul>${p.lignes.map((l) => `
+      <li><label><input type="checkbox" style="width:auto"> <strong>${l.quantite} × ${esc(l.produit)}</strong></label>
+        ${l.besoin ? "" : " <span class='muted'>(opportunité)</span>"}
+        ${l.economie_estimee ? ` <span class="eco">−${l.economie_estimee} €</span>` : ""}
+        <div class="muted">${esc(l.raison)}${l.offres_utilisees.length ? " · " + l.offres_utilisees.map(esc).join(", ") : ""}</div>
+      </li>`).join("")}</ul>
+    ${p.offres_ecartees.length ? `<details><summary class="muted">Offres écartées (${p.offres_ecartees.length})</summary><ul>${p.offres_ecartees.map((o) => `<li class="muted">${esc(o)}</li>`).join("")}</ul></details>` : ""}`;
+};
+
+charger(); afficherOffres();
+</script>
+</body>
+</html>
