@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from google import genai
@@ -75,9 +76,22 @@ Règles :
 - Les prix sont des estimations : mets null si tu n'as aucune base pour estimer."""
 
 
+_instance = None
+_verrou = threading.Lock()
+
+
+def _client() -> genai.Client:
+    # Un seul client partagé : un client temporaire peut être fermé par le ramasse-miettes en pleine requête
+    global _instance
+    with _verrou:
+        if _instance is None:
+            _instance = genai.Client(http_options=RETRY)
+        return _instance
+
+
 def _parse(contents, schema):
     # Clé lue dans GEMINI_API_KEY par le SDK
-    reponse = genai.Client(http_options=RETRY).models.generate_content(
+    reponse = _client().models.generate_content(
         model=MODEL,
         contents=contents,
         config=types.GenerateContentConfig(

@@ -72,6 +72,7 @@ def test_extraire_offres_appelle_gemini(monkeypatch):
             return type("R", (), {"candidates": [], "text": Extraction(solde_cagnotte=None, offres=[OFFRE]).model_dump_json()})()
 
     monkeypatch.setattr(ia.genai, "Client", lambda **kw: type("C", (), {"models": FauxModels()})())
+    monkeypatch.setattr(ia, "_instance", None)
     extraction = ia.extraire_offres([(b"img", "image/png")])
     assert extraction.offres == [OFFRE]
     assert appel["config"].response_schema is Extraction
@@ -228,3 +229,9 @@ def test_erreur_serveur_renvoie_du_json(monkeypatch):
     monkeypatch.setattr(catalogues, "catalogues_en_cours", plante)
     r = TestClient(main.app, raise_server_exceptions=False).post("/api/promos-semaine")
     assert r.status_code == 500 and r.json() == {"detail": "RuntimeError : clé invalide"}
+
+
+def test_client_gemini_partage(monkeypatch):
+    monkeypatch.setattr(ia.genai, "Client", lambda **kw: object())
+    monkeypatch.setattr(ia, "_instance", None)
+    assert ia._client() is ia._client()
