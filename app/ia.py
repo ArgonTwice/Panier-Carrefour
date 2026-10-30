@@ -145,9 +145,9 @@ def lire_catalogue(catalogue: Catalogue, pages: list[tuple[bytes, str]], par_app
     offres, complet = [], True
     for i in range(0, len(pages), par_appel):
         try:
-            # Simple recopie des pages : réflexion minimale, mais beaucoup de texte à écrire
+            # Simple recopie des pages : réflexion basse (MINIMAL refusé par le modèle), mais beaucoup de texte à écrire
             lecture = _parse([*_parts(pages[i:i + par_appel]), prompt], LectureCatalogue,
-                             reflexion=types.ThinkingLevel.MINIMAL, delai=300, max_sortie=65536)
+                             reflexion=types.ThinkingLevel.LOW, delai=300, max_sortie=65536)
         except QuotaEpuise:
             raise
         except Exception as e:
