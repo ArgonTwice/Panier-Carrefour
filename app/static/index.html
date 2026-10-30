@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panier Carrefour</title>
+<link rel="manifest" href="manifest.json" crossorigin="use-credentials">
+<link rel="icon" href="icone-192.png">
+<link rel="apple-touch-icon" href="icone-192.png">
+<meta name="theme-color" content="#0a5cad">
+<style>
+  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --line: #ddd; --accent: #0a5cad; --ok: #1d7a3a; --warn: #b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161616; --fg: #eee; --muted: #999; --line: #333; --accent: #6aa8f0; --ok: #5cc27a; --warn: #f28b82; } }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; max-width: 640px; padding: 16px; font: 16px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 2rem; }
+  textarea, input { width: 100%; padding: 8px; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 6px; }
+  button { padding: 10px 16px; font: inherit; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  ul { padding-left: 0; list-style: none; }
+  li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .eco { color: var(--ok); font-weight: 600; }
+  .err { color: var(--warn); }
+  .grand { width: 100%; padding: 14px; font-size: 1.1rem; }
+  #statut { position: sticky; top: 0; background: var(--bg); margin: 0; padding: 4px 0; }
+  .x { background: none; color: var(--muted); padding: 0 6px; float: right; }
+  select { width: 100%; padding: 8px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  .ligne { display: flex; gap: 12px; margin: 12px 0; } .ligne label { flex: 1; }
+  details { margin-top: 1.5rem; } summary { cursor: pointer; padding: 6px 0; }
+  .secondaire { background: none; color: var(--accent); border: 1px solid var(--accent); }
+  .outils { display: flex; gap: 8px; margin-top: 8px; } .outils button { flex: 1; }
+  #alertes { background: #fff4d6; color: #5a4300; border-radius: 6px; padding: 8px 12px; }
+  #alertes:empty { display: none; }
+  .ok { color: var(--ok); }
+  .coche strong { text-decoration: line-through; opacity: .5; }
+  /* Mode courses : seulement la liste, en gros, pour cocher en rayon */
+  body.courses #saisie, body.courses details, body.courses .detail, body.courses h1 { display: none; }
+  body.courses li { font-size: 1.3rem; padding: 14px 0; }
+  body.courses input[type=checkbox] { transform: scale(1.7); margin-right: 12px; }
+</style>
+</head>
+<body>
+<h1>🛒 Panier Carrefour</h1>
+<p id="statut"></p>
+<p id="alertes"></p>
+
+<div id="saisie">
+<textarea id="besoins" rows="4" placeholder="Ce qu'il te faut cette semaine, un par ligne : lait, pâtes, lessive…"></textarea>
+<div class="outils">
+  <button id="btn-voix" class="secondaire" hidden>🎤 Dicter</button>
+  <button id="btn-habitude" class="secondaire">⚡ Comme d'habitude</button>
+</div>
+<div class="ligne">
+  <label>Budget (€) <input type="number" id="budget" min="0" step="1"></label>
+  <label>Où ? <select id="canal">
+    <option value="les_deux">Les deux</option>
+    <option value="magasin">🏬 Magasin</option>
+    <option value="drive">🚗 Drive</option>
+  </select></label>
+</div>
+<p><button id="btn-panier" class="grand">🛒 Préparer mon panier</button></p>
+<p class="muted" id="progression"></p>
+<p><button id="btn-notifs" class="secondaire" hidden>🔔 Me prévenir sur ce téléphone</button>
+<span id="aide-notifs" class="muted" hidden>Pour être prévenu (panier du mardi, bons qui expirent) : ajoute l'appli à l'écran d'accueil, puis ouvre-la de là.</span></p>
+</div>
+<div id="panier"></div>
+<p><button id="btn-ticket" class="grand secondaire">🧾 Photo du ticket de caisse</button>
+<input type="file" id="ticket" accept="image/*" capture="environment" multiple hidden></p>
+
+<details>
+<summary><strong>Mes bons et challenges</strong> <span id="nb-offres" class="muted"></span></summary>
+<p class="muted">Le plus simple : dans l'appli Carrefour, lance l'<strong>enregistrement d'écran</strong> du téléphone, fais défiler
+tes bons (onglets magasin et drive) puis tes challenges, arrête, et choisis la vidéo ici. Une seule vidéo suffit.
+Tu peux aussi choisir plusieurs captures d'un coup. Les offres expirées disparaissent toutes seules.</p>
+<input type="file" id="captures" accept="image/*,video/*" multiple>
+<p id="cagnotte" class="muted"></p>
+<ul id="offres"></ul>
+<p><button id="btn-vider" class="x" style="float:none">Tout effacer</button></p>
+</details>
+
+<details id="habitudes">
+<summary><strong>Mes habitudes</strong></summary>
+<p><label>Ce que j'achète d'habitude <span class="muted">(l'appli propose d'en stocker quand c'est au plus bas)</span>
+<textarea id="habituels" rows="4" placeholder="Café, pâtes, papier toilette, lessive…"></textarea></label></p>
+<p><label>Déjà en stock à la maison <span class="muted">(ne sera pas reproposé ; complété par tes tickets)</span>
+<textarea id="stock" rows="3" placeholder="Riz, huile…"></textarea></label></p>
+<p id="historique" class="muted"></p>
+</details>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const etat = { offres: [], solde_cagnotte: null, historique: [] };
+const CHAMPS = ["besoins", "budget", "canal", "habituels", "stock"];
+const lignes = (id) => $(id).value.split("\n").map((s) => s.trim()).filter(Boolean);
+
+function charger() {
+  try {
+    Object.assign(etat, JSON.parse(localStorage.getItem("etat") || "{}"));
+    for (const c of CHAMPS) if (localStorage.getItem(c)) $(c).value = localStorage.getItem(c);
+  } catch {}
+}
+function sauver() {
+  try {
+    localStorage.setItem("etat", JSON.stringify(etat));
+    for (const c of CHAMPS) localStorage.setItem(c, $(c).value);
+  } catch {}
+  if (!synchro) return;
+  clearTimeout(envoi);
+  envoi = setTimeout(envoyer, 1000);
+}
+
+// Synchronisation avec le serveur : mêmes bons et besoins sur le PC et le téléphone
+let synchro = false, envoi = null;
+const instantane = () => ({ etat, champs: Object.fromEntries(CHAMPS.map((c) => [c, $(c).value])) });
+function envoyer() {
+  envoi = null;
+  fetch("/api/etat", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(instantane()) })
+    .catch(() => {});
+}
+async function synchroniser() {
+  if (envoi) return; // une modification locale part dans un instant : elle prime
+  try {
+    const { etat: serveur } = await (await fetch("/api/etat")).json();
+    if (serveur) {
+      Object.assign(etat, serveur.etat);
+      for (const c of CHAMPS) if (serveur.champs?.[c] != null) $(c).value = serveur.champs[c];
+      purgerExpirees(); afficherOffres(); afficherHistorique(); afficherPanier();
+    }
+    synchro = true;
+    sauver(); // premier lancement : ce qui était sur cet appareil part sur le serveur
+  } catch {}
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) synchroniser(); });
+function esc(s) { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
+
+const LIBELLES = { bon: "Bons", challenge: "Challenges", avantage: "Avantages", promo: "Promos" };
+
+function prochainPalier(o) {
+  const deja = o.deja_achete || 0;
+  const p = (o.paliers || []).slice().sort((a, b) => a.achat_euros - b.achat_euros).find((p) => p.achat_euros > deja);
+  return p ? `reste ${(p.achat_euros - deja).toFixed(2)} € pour gagner ${p.gain_euros} €` : "";
+}
+
+function details(o) {
+  const paliers = (o.paliers || []).map((p) => `${p.achat_euros} € → ${p.gain_euros} €`).join(", ");
+  return [
+    o.active === false ? "à activer" : o.active ? "activé" : "",
+    o.deja_achete != null ? `déjà ${o.deja_achete} € d'achats` : "",
+    paliers, prochainPalier(o), o.canal && o.canal !== "tous" ? o.canal : "", o.jour, o.conditions,
+    o.seuil_achat ? `dès ${o.seuil_achat} €` : "", o.date_fin ? `jusqu'au ${o.date_fin}` : "",
+  ].filter(Boolean).map(esc).join(" · ");
+}
+
+const JOURS = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+const jourIso = (decalage = 0) => new Date(Date.now() + decalage * 864e5).toISOString().slice(0, 10);
+
+// Bons qui expirent dans 3 jours ou moins : rappelés en haut de l'écran (et par notification côté serveur)
+function afficherAlertes() {
+  const bons = etat.offres.filter((o) => o.type === "bon" && o.date_fin && o.date_fin <= jourIso(3));
+  $("alertes").innerHTML = bons.length
+    ? `⏰ À utiliser vite : ${bons.map((o) => `<strong>${esc(o.produit)}</strong> (${o.date_fin === jourIso() ? "aujourd'hui" : JOURS[new Date(o.date_fin).getDay()]})`).join(", ")}`
+    : "";
+}
+
+function afficherOffres() {
+  afficherAlertes();
+  $("nb-offres").textContent = etat.offres.length ? `(${etat.offres.length})` : "· ajoute-les ici";
+  $("cagnotte").textContent = etat.solde_cagnotte != null ? `Cagnotte : ${etat.solde_cagnotte} €` : "";
+  if (!etat.offres.length) { $("offres").innerHTML = '<li class="muted">Aucune offre pour l\'instant.</li>'; return; }
+  $("offres").innerHTML = Object.entries(LIBELLES).map(([type, libelle]) => {
+    const lignes = etat.offres.map((o, i) => [o, i]).filter(([o]) => o.type === type);
+    if (!lignes.length) return "";
+    return `<li><details ${type === "promo" ? "" : "open"}><summary><strong>${libelle} (${lignes.length})</strong></summary><ul>
+      ${lignes.map(([o, i]) => `
+        <li><button class="x" data-i="${i}" title="Retirer">✕</button>
+          <strong>${esc(o.produit)}</strong> ${o.marque ? "· " + esc(o.marque) : ""}<br>
+          ${esc(o.remise_texte)}${o.prix_euros != null ? ` · ${o.prix_euros} €` : ""}
+          <div class="muted">${details(o)}</div>
+        </li>`).join("")}</ul></details></li>`;
+  }).join("");
+}
+
+function afficherHistorique() {
+  const n = etat.historique.length;
+  $("historique").textContent = n ? `Historique : ${n} prix relevés, pour repérer les vraies bonnes affaires.` : "";
+}
+
+// Garde le prix de chaque offre lue pour comparer d'un catalogue à l'autre
+function releverPrix(offres) {
+  const vus = new Set(etat.historique.map((r) => [r.produit, r.marque, r.prix, r.date_fin].join("|")));
+  for (const o of offres) {
+    if (o.prix_euros == null) continue;
+    const r = { produit: o.produit, marque: o.marque, prix: o.prix_euros, date_fin: o.date_fin };
+    const k = [r.produit, r.marque, r.prix, r.date_fin].join("|");
+    if (!vus.has(k)) { vus.add(k); etat.historique.push(r); }
+  }
+  etat.historique = etat.historique.slice(-5000);
+  afficherHistorique();
+}
+
+const cleOffre = (o) => [o.type, o.produit, o.marque, o.remise_texte].join("|").toLowerCase();
+
+// Une offre recapturée remplace l'ancienne (ex. progression d'un challenge mise à jour)
+function ajouterOffres(data) {
+  const nouvelles = new Set(data.offres.map(cleOffre));
+  etat.offres = etat.offres.filter((o) => !nouvelles.has(cleOffre(o))).concat(data.offres);
+  releverPrix(data.offres);
+  if (data.solde_cagnotte != null) etat.solde_cagnotte = data.solde_cagnotte;
+  sauver(); afficherOffres();
+}
+
+function purgerExpirees() {
+  const aujourdhui = new Date().toISOString().slice(0, 10);
+  etat.offres = etat.offres.filter((o) => !o.date_fin || o.date_fin >= aujourdhui);
+}
+
+async function appel(url, options, message = "Analyse en cours…") {
+  $("statut").className = "muted";
+  // Chrono : montre que l'appli travaille pendant les appels Gemini (jusqu'à 2 min)
+  const debut = Date.now();
+  const chrono = () => { const s = Math.round((Date.now() - debut) / 1000); $("statut").textContent = s ? `${message} ${s} s` : message; };
+  chrono();
+  const minuteur = setInterval(chrono, 1000);
+  try {
+    const r = await fetch(url, options);
+    const texte = await r.text();
+    let data;
+    try { data = JSON.parse(texte); } catch { data = { detail: texte.slice(0, 200) }; }
+    if (!r.ok) throw new Error(data.detail || r.statusText);
+    $("statut").textContent = "";
+    return data;
+  } catch (e) {
+    $("statut").textContent = "Erreur : " + e.message;
+    $("statut").className = "err";
+    throw e;
+  } finally {
+    clearInterval(minuteur);
+  }
+}
+
+$("captures").onchange = async () => {
+  const fichiers = $("captures").files;
+  if (!fichiers.length) return;
+  const fd = new FormData();
+  for (const f of fichiers) fd.append("captures", f);
+  try { ajouterOffres(await appel("/api/extraction", { method: "POST", body: fd }, "Lecture de tes bons et challenges…")); }
+  finally { $("captures").value = ""; }
+};
+
+$("offres").onclick = (e) => {
+  if (e.target.dataset.i === undefined) return;
+  etat.offres.splice(+e.target.dataset.i, 1);
+  sauver(); afficherOffres();
+};
+
+$("btn-vider").onclick = () => { etat.offres = []; etat.solde_cagnotte = null; sauver(); afficherOffres(); };
+for (const c of CHAMPS) $(c).oninput = sauver;
+$("canal").onchange = sauver;
+
+$("btn-panier").onclick = async () => {
+  $("btn-panier").disabled = true;
+  try { await preparer(); } catch {} finally { $("btn-panier").disabled = false; }
+};
+
+async function preparer() {
+  const semaine = await appel("/api/promos-semaine", { method: "POST" }, "Récupération des promos…");
+  setTimeout(suivreLecture, 1000);
+  releverPrix(semaine.offres);
+  sauver();
+  const p = await appel("/api/panier", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      besoins: lignes("besoins"),
+      habituels: lignes("habituels"),
+      stock: lignes("stock"),
+      historique: etat.historique,
+      budget: $("budget").value ? +$("budget").value : null,
+      offres: [...etat.offres, ...semaine.offres],
+      solde_cagnotte: etat.solde_cagnotte,
+      canal: $("canal").value,
+    }),
+  }, `Composition du panier avec ${semaine.offres.length} promos de ${semaine.catalogues.length} catalogues…`);
+  etat.panier = { ...p, coches: [] };
+  sauver(); afficherPanier();
+}
+
+const CANAL = { magasin: "🏬 En magasin", drive: "🚗 En drive" };
+
+// Le dernier panier est gardé (et synchronisé) : on le retrouve sur le téléphone en arrivant au magasin
+function afficherPanier() {
+  const p = etat.panier;
+  if (!p) { $("panier").innerHTML = ""; return; }
+  const groupes = Object.keys(CANAL).map((canal) => [canal, p.lignes.map((l, i) => [l, i]).filter(([l]) => (l.canal || "magasin") === canal)])
+    .filter(([, lignes]) => lignes.length);
+  $("panier").innerHTML = `
+    <p><button id="btn-courses" class="grand secondaire">${document.body.classList.contains("courses") ? "✓ Terminer les courses" : "🧺 Mode courses (liste en gros)"}</button></p>
+    <div class="detail">
+    ${p.auto ? `<p class="muted">✨ Préparé tout seul le ${new Date(p.auto).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} avec les nouveaux catalogues</p>` : ""}
+    <p><strong>Total estimé : ${p.total_estime} €</strong> · <span class="eco">Économie : ${p.economie_totale} €</span>
+    ${p.economie_cagnotte ? `<br><span class="muted">dont ${p.economie_cagnotte} € en cagnotte, ${(p.economie_totale - p.economie_cagnotte).toFixed(2)} € en caisse</span>` : ""}
+    ${p.hors_budget ? '<br><span class="err">Dépasse le budget</span>' : ""}</p>
+    ${p.quand_commander ? `<p>🗓️ ${esc(p.quand_commander)}</p>` : ""}
+    ${p.a_faire.length ? `<h2>À faire avant</h2><ul>${p.a_faire.map((a) => `<li>☐ ${esc(a)}</li>`).join("")}</ul>` : ""}
+    </div>
+    ${groupes.map(([canal, lignes]) => `
+      <h2>${CANAL[canal]} <span class="muted">· ${lignes.reduce((t, [l]) => t + (l.prix_estime || 0), 0).toFixed(2)} €</span></h2>
+      <ul>${lignes.map(([l, i]) => `
+        <li class="${p.coches[i] ? "coche" : ""}"><label><input type="checkbox" data-ligne="${i}" style="width:auto" ${p.coches[i] ? "checked" : ""}>
+          <strong>${l.quantite} × ${esc(l.produit)}</strong></label>
+          ${l.economie_estimee ? ` <span class="eco">−${l.economie_estimee} €</span>` : ""}
+          <div class="muted detail">${l.besoin ? "" : "Opportunité · "}${esc(l.raison)}${l.offres_utilisees.length ? " · " + l.offres_utilisees.map(esc).join(", ") : ""}</div>
+        </li>`).join("")}</ul>`).join("")}
+    ${p.offres_ecartees.length ? `<details class="detail"><summary class="muted">Offres écartées (${p.offres_ecartees.length})</summary><ul>${p.offres_ecartees.map((o) => `<li class="muted">${esc(o)}</li>`).join("")}</ul></details>` : ""}`;
+}
+
+$("panier").onclick = (e) => {
+  if (e.target.id === "btn-courses") {
+    document.body.classList.toggle("courses");
+    scrollTo(0, 0);
+    afficherPanier();
+  } else if (e.target.dataset.ligne !== undefined) {
+    etat.panier.coches[+e.target.dataset.ligne] = e.target.checked;
+    e.target.closest("li").classList.toggle("coche", e.target.checked);
+    sauver();
+  }
+};
+
+// Les catalogues sont lus en arrière-plan dès le lancement : on affiche où en est la lecture
+async function suivreLecture() {
+  try {
+    const { lus, total, en_cours, erreur, catalogue } = await (await fetch("/api/progression")).json();
+    $("progression").textContent = erreur
+      ? `⚠️ ${erreur} (${lus}/${total} catalogues lus)`
+      : lus < total
+        ? `Lecture des catalogues en arrière-plan : ${lus}/${total}${catalogue ? ` (en cours : ${catalogue}, 1 à 3 min)` : ""}… Tu peux déjà préparer ton panier.`
+        : `✓ ${total} catalogues de la semaine prêts`;
+    if (en_cours || (!erreur && lus < total)) setTimeout(suivreLecture, 10000);
+  } catch { setTimeout(suivreLecture, 20000); }
+}
+
+// Rapprochement de noms de produits : "pâtes" correspond à "Pâtes Barilla 500 g"
+const mots = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().match(/[a-z0-9]+/g)?.map((m) => m.replace(/[sx]$/, "")) || [];
+function correspond(court, long) {
+  const dans = new Set(mots(long)), cherches = mots(court);
+  return cherches.length > 0 && cherches.every((m) => dans.has(m));
+}
+const memeProduit = (a, b) => correspond(a, b) || correspond(b, a);
+
+$("btn-habitude").onclick = () => {
+  const stock = lignes("stock");
+  const habituels = lignes("habituels").filter((h) => !stock.some((s) => memeProduit(h, s)));
+  if (!lignes("habituels").length) {
+    $("habitudes").open = true;
+    $("statut").className = "muted";
+    $("statut").textContent = "Remplis « Ce que j'achète d'habitude » (tes tickets le complètent tout seuls).";
+    return;
+  }
+  const besoins = lignes("besoins");
+  $("besoins").value = besoins.concat(habituels.filter((h) => !besoins.some((b) => memeProduit(b, h)))).join("\n");
+  sauver();
+};
+
+// Dictée : "du lait, des pâtes et de la lessive" -> une ligne par produit
+const Reconnaissance = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (Reconnaissance) {
+  $("btn-voix").hidden = false;
+  $("btn-voix").onclick = () => {
+    const r = new Reconnaissance();
+    r.lang = "fr-FR";
+    r.onstart = () => { $("btn-voix").textContent = "🎤 Je t'écoute…"; };
+    r.onend = () => { $("btn-voix").textContent = "🎤 Dicter"; };
+    r.onresult = (e) => {
+      const dits = e.results[0][0].transcript.split(/,| et | puis |\./i)
+        .map((s) => s.trim().replace(/^(du|de la|de l'|des|un|une|le|la|les)\s+/i, "")).filter(Boolean);
+      $("besoins").value = lignes("besoins").concat(dits).join("\n");
+      sauver();
+    };
+    r.start();
+  };
+}
+
+// Ticket de caisse : vrais prix, progression des challenges, stock et habitudes mis à jour
+$("btn-ticket").onclick = () => $("ticket").click();
+$("ticket").onchange = async () => {
+  const fichiers = $("ticket").files;
+  if (!fichiers.length) return;
+  try { await lireTicket(fichiers); } catch {} finally { $("ticket").value = ""; }
+};
+
+async function lireTicket(fichiers) {
+  const challenges = etat.offres.filter((o) => o.type === "challenge");
+  const fd = new FormData();
+  for (const f of fichiers) fd.append("photos", f);
+  fd.append("challenges", JSON.stringify(challenges));
+  const t = await appel("/api/ticket", { method: "POST", body: fd }, "Lecture du ticket…");
+  const id = t.date && t.total != null ? `${t.date}|${t.total}` : String(Date.now()); // même ticket envoyé deux fois : compté une fois
+  etat.tickets ||= [];
+  if (etat.tickets.includes(id)) { $("statut").textContent = "Ce ticket est déjà enregistré."; return; }
+  etat.tickets = etat.tickets.concat(id).slice(-50);
+
+  releverPrix(t.lignes.map((l) => ({ produit: l.produit, marque: l.marque, date_fin: t.date,
+    prix_euros: l.prix_unitaire ?? +(l.prix_total / (l.quantite || 1)).toFixed(2) })));
+
+  const bilan = [];
+  for (const a of t.challenges) {
+    const c = challenges[a.numero];
+    if (!c || !(a.montant > 0)) continue;
+    c.deja_achete = +((c.deja_achete || 0) + a.montant).toFixed(2);
+    bilan.push(`${c.produit} +${a.montant.toFixed(2)} €`);
+  }
+
+  const stock = lignes("stock");
+  const ajouts = t.lignes.filter((l) => l.se_conserve && !stock.some((s) => memeProduit(s, l.produit))).map((l) => l.produit);
+  $("stock").value = stock.concat(ajouts).join("\n");
+  $("besoins").value = lignes("besoins").filter((b) => !t.lignes.some((l) => correspond(b, l.produit))).join("\n");
+
+  // Acheté sur 2 tickets différents : devient une habitude
+  etat.achats = (etat.achats || []).concat(t.lignes.map((l) => ({ produit: l.produit, ticket: id }))).slice(-1000);
+  const tickets = {};
+  for (const a of etat.achats) (tickets[mots(a.produit).join(" ")] ||= { produit: a.produit, ids: new Set() }).ids.add(a.ticket);
+  const habituels = lignes("habituels");
+  const nouvelles = Object.values(tickets).filter((x) => x.ids.size >= 2 && !habituels.some((h) => memeProduit(h, x.produit))).map((x) => x.produit);
+  $("habituels").value = habituels.concat(nouvelles).join("\n");
+
+  if (t.solde_cagnotte != null) etat.solde_cagnotte = t.solde_cagnotte;
+  sauver(); afficherOffres();
+  $("statut").className = "ok";
+  $("statut").textContent = [`✓ Ticket lu : ${t.lignes.length} articles${t.total != null ? `, ${t.total} €` : ""}`,
+    bilan.length && `challenges : ${bilan.join(", ")}`, ajouts.length && `${ajouts.length} produits ajoutés au stock`,
+    nouvelles.length && `${nouvelles.length} nouvelles habitudes`].filter(Boolean).join(" · ");
+}
+
+// Notifications : panier préparé le mardi, bons qui expirent
+async function preparerNotifs() {
+  if (!("serviceWorker" in navigator)) return;
+  const reg = await navigator.serviceWorker.register("sw.js");
+  if (!("PushManager" in window)) {
+    // iPhone : les notifications ne marchent que dans l'appli ajoutée à l'écran d'accueil
+    $("aide-notifs").hidden = !/iPhone|iPad/.test(navigator.userAgent);
+    return;
+  }
+  const abonnement = await reg.pushManager.getSubscription();
+  if (abonnement) envoyerAbonnement(abonnement); // le serveur peut l'avoir perdu (base vidée)
+  else $("btn-notifs").hidden = false;
+}
+const envoyerAbonnement = (a) => fetch("/api/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(a) });
+
+$("btn-notifs").onclick = async () => {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const { cle } = await (await fetch("/api/notifications")).json();
+    const brut = atob(cle.replace(/-/g, "+").replace(/_/g, "/"));
+    const abonnement = await reg.pushManager.subscribe({ userVisibleOnly: true,
+      applicationServerKey: Uint8Array.from(brut, (c) => c.charCodeAt(0)) });
+    await envoyerAbonnement(abonnement);
+    await fetch("/api/notifications/essai", { method: "POST" });
+    $("btn-notifs").hidden = true;
+  } catch (e) {
+    $("statut").className = "err";
+    $("statut").textContent = "Notifications refusées : autorise-les dans les réglages du navigateur.";
+  }
+};
+
+preparerNotifs().catch(() => {});
+suivreLecture();
+charger(); purgerExpirees(); sauver(); afficherOffres(); afficherHistorique(); afficherPanier();
+synchroniser();
+</script>
+</body>
+</html>
