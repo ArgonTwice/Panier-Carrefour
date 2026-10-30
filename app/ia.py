@@ -17,9 +17,11 @@ from .models import DemandePanier, Extraction, LectureCatalogue, Offre, Panier, 
 log = logging.getLogger("uvicorn.error")
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+# Modèle plus rapide, avec son propre quota : prend le relais si le principal est surchargé ou épuisé
+SECOURS = os.environ.get("GEMINI_MODEL_SECOURS", "gemini-flash-lite-latest")
 # Réessais faits à la main (voir _parse) : ceux du SDK relancent aussi un appel trop long, ce qui multiplie l'attente
 SANS_REESSAI = types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1))
-REESSAIS = (10, 30)
+ESSAIS = ((MODEL, 0), (SECOURS, 0), (SECOURS, 15))  # (modèle, attente avant l'essai en s)
 
 
 class QuotaEpuise(RuntimeError):
@@ -99,29 +101,31 @@ def _client() -> genai.Client:
         return _instance
 
 
-def _parse(contents, schema, reflexion=types.ThinkingLevel.LOW, delai=120, max_sortie=8192):
-    # Clé lue dans GEMINI_API_KEY par le SDK. Réflexion réduite, délai et taille de réponse bornés :
-    # sans ces limites, Gemini peut boucler des minutes en JSON
-    config = types.GenerateContentConfig(
-        response_mime_type="application/json", response_schema=schema, max_output_tokens=max_sortie,
-        thinking_config=types.ThinkingConfig(thinking_level=reflexion),
-        http_options=types.HttpOptions(timeout=delai * 1000, retry_options=SANS_REESSAI.retry_options))
-    for attente in (*REESSAIS, None):
+def _parse(contents, schema, delai=90, max_sortie=8192):
+    # Clé lue dans GEMINI_API_KEY par le SDK. Délai et taille de réponse bornés : sans eux Gemini peut boucler
+    # des minutes en JSON. Surcharge (503/504), délai dépassé ou quota épuisé : on bascule sur le modèle de secours
+    for modele, attente in ESSAIS:
+        time.sleep(attente)
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json", response_schema=schema, max_output_tokens=max_sortie,
+            # Réflexion basse sur le principal (MINIMAL y est refusé) ; réglage par défaut sur le secours
+            thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW) if modele == MODEL else None,
+            http_options=types.HttpOptions(timeout=delai * 1000, retry_options=SANS_REESSAI.retry_options))
         debut = time.monotonic()
-        log.info("Gemini : envoi %s…", schema.__name__)
+        log.info("Gemini (%s) : envoi %s…", modele, schema.__name__)
         try:
-            reponse = _client().models.generate_content(model=MODEL, contents=contents, config=config)
+            reponse = _client().models.generate_content(model=modele, contents=contents, config=config)
             break
-        except httpx.TimeoutException as e:
-            raise RuntimeError(f"Gemini n'a pas répondu en {delai} s, réessaie dans un moment") from e
+        except httpx.TimeoutException:
+            erreur = RuntimeError(f"Gemini n'a pas répondu en {delai} s, réessaie dans quelques minutes")
         except errors.APIError as e:
-            if _quota_journalier(e):
-                raise QuotaEpuise("Quota gratuit de Gemini atteint pour aujourd'hui : réessaie demain") from e
-            # Limite par minute ou serveur surchargé : on patiente puis on réessaie
-            if e.code not in (429, 500, 503) or attente is None:
+            if e.code not in (429, 500, 503, 504):
                 raise
-            log.warning("Gemini indisponible (%s), nouvel essai dans %d s", e.code, attente)
-            time.sleep(attente)
+            erreur = (QuotaEpuise("Quota gratuit de Gemini atteint pour aujourd'hui : réessaie demain")
+                      if _quota_journalier(e) else RuntimeError(f"Gemini surchargé ({e.code}), réessaie dans quelques minutes"))
+        log.warning("Gemini (%s) : %s", modele, erreur)
+    else:
+        raise erreur
     fin = reponse.candidates[0].finish_reason if reponse.candidates else None
     if fin == types.FinishReason.MAX_TOKENS:
         raise RuntimeError("Réponse de Gemini trop longue, coupée : réessaie")
@@ -145,9 +149,8 @@ def lire_catalogue(catalogue: Catalogue, pages: list[tuple[bytes, str]], par_app
     offres, complet = [], True
     for i in range(0, len(pages), par_appel):
         try:
-            # Simple recopie des pages : réflexion basse (MINIMAL refusé par le modèle), mais beaucoup de texte à écrire
-            lecture = _parse([*_parts(pages[i:i + par_appel]), prompt], LectureCatalogue,
-                             reflexion=types.ThinkingLevel.LOW, delai=300, max_sortie=65536)
+            # Beaucoup d'images à lire et de texte à écrire : délai et réponse plus longs
+            lecture = _parse([*_parts(pages[i:i + par_appel]), prompt], LectureCatalogue, delai=300, max_sortie=65536)
         except QuotaEpuise:
             raise
         except Exception as e:

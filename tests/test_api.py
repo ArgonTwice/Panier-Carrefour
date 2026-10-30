@@ -86,7 +86,7 @@ def test_extraire_offres_appelle_gemini(monkeypatch):
     assert extraction.offres == [OFFRE]
     assert appel["config"].response_schema is Extraction
     assert appel["contents"][0].inline_data.mime_type == "image/png"
-    assert appel["config"].http_options.timeout == 120_000
+    assert appel["config"].http_options.timeout == 90_000
 
 
 def test_gemini_reessaie_sur_limite_par_minute(monkeypatch):
@@ -104,13 +104,29 @@ def test_gemini_reessaie_sur_limite_par_minute(monkeypatch):
     assert ia.extraire_offres([(b"img", "image/png")]).offres == [] and len(appels) == 2
 
 
+def test_gemini_bascule_sur_secours_puis_quota(monkeypatch):
+    modeles = []
+
+    class FauxModels:
+        def generate_content(self, model, **kw):
+            modeles.append(model)
+            raise ia.errors.APIError(429, {"error": {"message": "PerDay", "status": "RESOURCE_EXHAUSTED"}})
+
+    monkeypatch.setattr(ia, "_instance", type("C", (), {"models": FauxModels()})())
+    monkeypatch.setattr(ia.time, "sleep", lambda s: None)
+    with pytest.raises(ia.QuotaEpuise):
+        ia.extraire_offres([(b"img", "image/png")])
+    assert modeles == [ia.MODEL, ia.SECOURS, ia.SECOURS]
+
+
 def test_gemini_trop_long(monkeypatch):
     class FauxModels:
         def generate_content(self, **kw):
             raise httpx.ReadTimeout("trop long")
 
     monkeypatch.setattr(ia, "_instance", type("C", (), {"models": FauxModels()})())
-    with pytest.raises(RuntimeError, match="n'a pas répondu en 120 s"):
+    monkeypatch.setattr(ia.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="n'a pas répondu en 90 s"):
         ia.extraire_offres([(b"img", "image/png")])
 
 
