@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import threading
+from datetime import date
 import time
 
 import httpx
@@ -101,10 +102,16 @@ def _client() -> genai.Client:
         return _instance
 
 
+_epuises: dict[date, set[str]] = {}
+
+
 def _parse(contents, schema, delai=90, max_sortie=8192):
     # Clé lue dans GEMINI_API_KEY par le SDK. Délai et taille de réponse bornés : sans eux Gemini peut boucler
     # des minutes en JSON. Surcharge (503/504), délai dépassé ou quota épuisé : on bascule sur le modèle de secours
+    erreur = QuotaEpuise("Quota gratuit de Gemini atteint pour aujourd'hui : réessaie demain")
     for modele, attente in ESSAIS:
+        if modele in _epuises.get(date.today(), ()):
+            continue  # quota du jour déjà atteint sur ce modèle : inutile de le redemander
         time.sleep(attente)
         config = types.GenerateContentConfig(
             response_mime_type="application/json", response_schema=schema, max_output_tokens=max_sortie,
@@ -121,8 +128,11 @@ def _parse(contents, schema, delai=90, max_sortie=8192):
         except errors.APIError as e:
             if e.code not in (429, 500, 503, 504):
                 raise
-            erreur = (QuotaEpuise("Quota gratuit de Gemini atteint pour aujourd'hui : réessaie demain")
-                      if _quota_journalier(e) else RuntimeError(f"Gemini surchargé ({e.code}), réessaie dans quelques minutes"))
+            if _quota_journalier(e):
+                _epuises.setdefault(date.today(), set()).add(modele)
+                erreur = QuotaEpuise("Quota gratuit de Gemini atteint pour aujourd'hui : réessaie demain")
+            else:
+                erreur = RuntimeError(f"Gemini surchargé ({e.code}), réessaie dans quelques minutes")
         log.warning("Gemini (%s) : %s", modele, erreur)
     else:
         raise erreur

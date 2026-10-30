@@ -9,6 +9,11 @@ from app import catalogues, historique, ia, main
 from app.models import (DemandePanier, Extraction, LectureCatalogue, LignePanier, Offre, PromoCatalogue,
                         PropositionPanier, Releve)
 
+@pytest.fixture(autouse=True)
+def quotas_neufs(monkeypatch):
+    monkeypatch.setattr(ia, "_epuises", {})
+
+
 client = TestClient(main.app)
 
 OFFRE = Offre(
@@ -116,7 +121,11 @@ def test_gemini_bascule_sur_secours_puis_quota(monkeypatch):
     monkeypatch.setattr(ia.time, "sleep", lambda s: None)
     with pytest.raises(ia.QuotaEpuise):
         ia.extraire_offres([(b"img", "image/png")])
-    assert modeles == [ia.MODEL, ia.SECOURS, ia.SECOURS]
+    assert modeles == [ia.MODEL, ia.SECOURS]
+    # Les deux modèles sont épuisés pour la journée : plus aucun appel
+    with pytest.raises(ia.QuotaEpuise):
+        ia.extraire_offres([(b"img", "image/png")])
+    assert len(modeles) == 2
 
 
 def test_gemini_trop_long(monkeypatch):
@@ -331,3 +340,13 @@ def test_alleger_page():
     tampon = io.BytesIO()
     Image.new("RGB", (1193, 2000), "white").save(tampon, "JPEG")
     assert Image.open(io.BytesIO(catalogues.alleger(tampon.getvalue()))).size == (895, 1500)
+
+
+def test_cache_caracteres_speciaux_et_fichier_vide(monkeypatch, tmp_path):
+    monkeypatch.setattr(catalogues, "CACHE", tmp_path)
+    cat = catalogues.Catalogue(id=9, titre="T", debut=None, fin=None, couverture="")
+    (tmp_path / "9.json").write_bytes(b"")
+    assert not catalogues.est_en_cache(cat)
+    offre = OFFRE.model_copy(update={"produit": "Yıldız çay – œufs"})
+    catalogues.lire_avec_cache(cat, lambda c: (Extraction(solde_cagnotte=None, offres=[offre]), True))
+    assert catalogues.est_en_cache(cat) and catalogues.offres_en_cache(cat)[0].produit == "Yıldız çay – œufs"

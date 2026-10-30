@@ -107,12 +107,19 @@ def alleger(image: bytes) -> bytes:
 _verrou = threading.Lock()
 
 
+def _fichier(catalogue: Catalogue) -> Path:
+    return CACHE / f"{catalogue.id}.json"
+
+
 def est_en_cache(catalogue: Catalogue) -> bool:
-    return (CACHE / f"{catalogue.id}.json").exists()
+    # Un fichier vide (écriture interrompue) ne compte pas : le catalogue sera relu
+    fichier = _fichier(catalogue)
+    return fichier.exists() and fichier.stat().st_size > 0
 
 
 def offres_en_cache(catalogue: Catalogue) -> list[Offre]:
-    return Extraction.model_validate_json((CACHE / f"{catalogue.id}.json").read_text()).offres
+    # En octets : Windows lirait sinon en cp1252 et casserait les accents
+    return Extraction.model_validate_json(_fichier(catalogue).read_bytes()).offres
 
 
 def lire_avec_cache(catalogue: Catalogue, lire) -> list[Offre]:
@@ -122,11 +129,13 @@ def lire_avec_cache(catalogue: Catalogue, lire) -> list[Offre]:
     Le verrou évite de lire deux fois le même catalogue (lecture de fond + clic sur le bouton).
     """
     with _verrou:
-        fichier = CACHE / f"{catalogue.id}.json"
-        if fichier.exists():
-            return Extraction.model_validate_json(fichier.read_text()).offres
+        if est_en_cache(catalogue):
+            return offres_en_cache(catalogue)
         extraction, complet = lire(catalogue)
         if complet:
             CACHE.mkdir(parents=True, exist_ok=True)
-            fichier.write_text(extraction.model_dump_json())
+            # Écrit dans un fichier temporaire puis renomme : jamais de cache à moitié écrit
+            temporaire = _fichier(catalogue).with_suffix(".tmp")
+            temporaire.write_bytes(extraction.model_dump_json().encode("utf-8"))
+            temporaire.replace(_fichier(catalogue))
         return extraction.offres
