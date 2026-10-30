@@ -7,12 +7,12 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
-from pathlib import Path
 
 import httpx
 from PIL import Image
 from pydantic import BaseModel
 
+from . import stockage
 from .models import Extraction, Offre
 
 SITE = "https://www.promocatalogues.fr"
@@ -21,7 +21,6 @@ LISTE = f"{SITE}/magasins/carrefour/catalogues-promotions"
 # Catalogues hors courses alimentaires ou d'autres régions, inutiles pour le Carrefour de Givors (hyper, Rhône).
 # promocatalogues.fr ne filtre pas par magasin : la page de Givors liste les mêmes catalogues que la liste nationale.
 EXCLUS = ("bretagne", "alsace", "bredele", "jouets", "voyages", "energies", "tex ", "culture", "sorties")
-CACHE = Path(__file__).parent.parent / "data" / "catalogues"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"}
 
 
@@ -110,28 +109,21 @@ def alleger(image: bytes) -> bytes:
 _verrou = threading.Lock()
 
 
-def _fichier(catalogue: Catalogue) -> Path:
-    return CACHE / f"{catalogue.id}.json"
+def _cle(catalogue: Catalogue) -> str:
+    return f"catalogues/{catalogue.id}"
 
 
 def est_en_cache(catalogue: Catalogue) -> bool:
-    # Un fichier vide (écriture interrompue) ne compte pas : le catalogue sera relu
-    fichier = _fichier(catalogue)
-    return fichier.exists() and fichier.stat().st_size > 0
+    return stockage.lire(_cle(catalogue)) is not None
 
 
 def offres_en_cache(catalogue: Catalogue) -> list[Offre]:
-    brut = _fichier(catalogue).read_bytes()
     try:
-        texte = brut.decode("utf-8")
-    except UnicodeDecodeError:
-        texte = brut.decode("cp1252", errors="replace")  # cache écrit par une ancienne version sous Windows
-    try:
-        return Extraction.model_validate_json(texte).offres
+        return Extraction.model_validate_json(stockage.lire(_cle(catalogue)) or "").offres
     except ValueError:
         # Cache illisible : on le supprime pour que le catalogue soit relu
         log.warning("Cache du catalogue %s illisible, il sera relu", catalogue.titre)
-        _fichier(catalogue).unlink(missing_ok=True)
+        stockage.supprimer(_cle(catalogue))
         return []
 
 
@@ -146,9 +138,5 @@ def lire_avec_cache(catalogue: Catalogue, lire) -> list[Offre]:
             return offres_en_cache(catalogue)
         extraction, complet = lire(catalogue)
         if complet:
-            CACHE.mkdir(parents=True, exist_ok=True)
-            # Écrit dans un fichier temporaire puis renomme : jamais de cache à moitié écrit
-            temporaire = _fichier(catalogue).with_suffix(".tmp")
-            temporaire.write_bytes(extraction.model_dump_json().encode("utf-8"))
-            temporaire.replace(_fichier(catalogue))
+            stockage.ecrire(_cle(catalogue), extraction.model_dump_json())
         return extraction.offres

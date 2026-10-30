@@ -1,4 +1,5 @@
 import base64
+import json
 import logging
 import os
 import secrets
@@ -12,7 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import catalogues, ia
+from . import catalogues, ia, stockage
 from .catalogues import Catalogue
 from .models import DemandePanier, Extraction, Offre, Panier
 
@@ -136,6 +137,18 @@ def panier(demande: DemandePanier) -> Panier:
     if not demande.offres and not demande.carte_pass:
         raise HTTPException(400, "Aucune offre trouvée")
     return ia.composer_panier(demande)
+
+
+@app.get("/api/etat")
+def lire_etat() -> dict:
+    """Bons, besoins et historique : enregistrés côté serveur pour être les mêmes sur le PC et le téléphone."""
+    return {"etat": json.loads(stockage.lire("etat") or "null")}
+
+
+@app.put("/api/etat")
+def ecrire_etat(etat: dict) -> dict:
+    stockage.ecrire("etat", json.dumps(etat, ensure_ascii=False))
+    return {"ok": True}
 
 
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")

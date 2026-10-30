@@ -30,8 +30,10 @@ pytest
 ## Sur le téléphone (Render, gratuit)
 
 1. Sur render.com, inscris-toi avec GitHub, puis New > Blueprint > ce dépôt.
-2. Renseigne `GEMINI_API_KEY` (ta clé) et `APP_MOT_DE_PASSE` (au choix), puis Apply.
+2. Renseigne `GEMINI_API_KEY` (ta clé), `APP_MOT_DE_PASSE` (au choix) et `DATABASE_URL`
+   (base gratuite sur neon.tech : inscription avec GitHub, puis « Connection string »), puis Apply.
 3. Ouvre le lien `https://….onrender.com` sur le téléphone (n'importe quel identifiant + le mot de passe),
    puis « Ajouter à l'écran d'accueil ».
 
 Le service gratuit s'endort après 15 min sans visite : la première ouverture prend environ 1 min.
+La base garde les catalogues lus pendant la veille, et les bons et besoins sont les mêmes sur tous les appareils.

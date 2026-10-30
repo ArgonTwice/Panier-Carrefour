@@ -6,13 +6,16 @@ import pytest
 from fastapi.testclient import TestClient
 from google.genai import types
 
-from app import catalogues, historique, ia, main
+from app import catalogues, historique, ia, main, stockage
 from app.models import (DemandePanier, Extraction, LectureCatalogue, LignePanier, Offre, PromoCatalogue,
                         PropositionPanier, Releve)
 
 @pytest.fixture(autouse=True)
-def quotas_neufs(monkeypatch):
+def quotas_neufs(monkeypatch, tmp_path):
     monkeypatch.setattr(ia, "_epuises", {})
+    monkeypatch.setattr(stockage, "_memoire", {})
+    monkeypatch.setattr(stockage, "DOSSIER", tmp_path / "data")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
 
 client = TestClient(main.app)
@@ -272,7 +275,7 @@ def test_totaliser_separe_la_cagnotte():
 
 
 def test_lire_avec_cache_ne_lit_qu_une_fois(monkeypatch, tmp_path):
-    monkeypatch.setattr(catalogues, "CACHE", tmp_path)
+    monkeypatch.setattr(stockage, "DOSSIER", tmp_path)
     appels = []
     cat = catalogues.Catalogue(id=42, titre="T", debut=None, fin=None, couverture="")
 
@@ -289,7 +292,7 @@ def test_lire_avec_cache_ne_lit_qu_une_fois(monkeypatch, tmp_path):
 
 
 def test_promos_semaine_renvoie_les_catalogues_deja_lus(monkeypatch, tmp_path):
-    monkeypatch.setattr(catalogues, "CACHE", tmp_path)
+    monkeypatch.setattr(stockage, "DOSSIER", tmp_path)
     cats = [catalogues.Catalogue(id=i, titre="T", debut=None, fin=None, couverture="") for i in (1, 2)]
     monkeypatch.setattr(catalogues, "catalogues_en_cours", lambda: cats)
     monkeypatch.setattr(catalogues, "pages", lambda i: [])
@@ -304,7 +307,7 @@ def test_promos_semaine_renvoie_les_catalogues_deja_lus(monkeypatch, tmp_path):
 
 
 def test_lecture_de_fond_s_arrete_sur_quota(monkeypatch, tmp_path):
-    monkeypatch.setattr(catalogues, "CACHE", tmp_path)
+    monkeypatch.setattr(stockage, "DOSSIER", tmp_path)
     cats = [catalogues.Catalogue(id=i, titre="T", debut=None, fin=None, couverture="") for i in (1, 2)]
     monkeypatch.setattr(catalogues, "catalogues_en_cours", lambda: cats)
     monkeypatch.setattr(catalogues, "pages", lambda i: [])
@@ -344,9 +347,10 @@ def test_alleger_page():
 
 
 def test_cache_caracteres_speciaux_et_fichier_vide(monkeypatch, tmp_path):
-    monkeypatch.setattr(catalogues, "CACHE", tmp_path)
+    monkeypatch.setattr(stockage, "DOSSIER", tmp_path)
     cat = catalogues.Catalogue(id=9, titre="T", debut=None, fin=None, couverture="")
-    (tmp_path / "9.json").write_bytes(b"")
+    (tmp_path / "catalogues").mkdir()
+    (tmp_path / "catalogues" / "9.json").write_bytes(b"")
     assert not catalogues.est_en_cache(cat)
     offre = OFFRE.model_copy(update={"produit": "Yıldız çay – œufs"})
     catalogues.lire_avec_cache(cat, lambda c: (Extraction(solde_cagnotte=None, offres=[offre]), True))
@@ -354,12 +358,14 @@ def test_cache_caracteres_speciaux_et_fichier_vide(monkeypatch, tmp_path):
 
 
 def test_cache_ancien_format_windows_et_illisible(monkeypatch, tmp_path):
-    monkeypatch.setattr(catalogues, "CACHE", tmp_path)
+    monkeypatch.setattr(stockage, "DOSSIER", tmp_path)
     cat = catalogues.Catalogue(id=8, titre="T", debut=None, fin=None, couverture="")
+    (tmp_path / "catalogues").mkdir()
     offre = OFFRE.model_copy(update={"produit": "Purée écrasée"})
-    (tmp_path / "8.json").write_bytes(Extraction(solde_cagnotte=None, offres=[offre]).model_dump_json().encode("cp1252"))
+    (tmp_path / "catalogues" / "8.json").write_bytes(Extraction(solde_cagnotte=None, offres=[offre]).model_dump_json().encode("cp1252"))
     assert catalogues.offres_en_cache(cat)[0].produit == "Purée écrasée"
-    (tmp_path / "8.json").write_bytes(b"{pas du json")
+    (tmp_path / "catalogues" / "8.json").write_bytes(b"{pas du json")
+    stockage._memoire.clear()
     assert catalogues.offres_en_cache(cat) == [] and not catalogues.est_en_cache(cat)
 
 
@@ -399,3 +405,11 @@ def test_mot_de_passe_en_ligne(monkeypatch):
     assert client.get("/").status_code == 401
     assert client.get("/", auth=("antho", "faux")).status_code == 401
     assert client.get("/", auth=("antho", "secret")).status_code == 200
+
+
+def test_etat_partage_entre_appareils():
+    assert client.get("/api/etat").json() == {"etat": None}
+    etat = {"etat": {"offres": [], "historique": []}, "champs": {"besoins": "pâtes"}, "drive": False}
+    assert client.put("/api/etat", json=etat).status_code == 200
+    stockage._memoire.clear()  # relu depuis le disque, comme après un redémarrage
+    assert client.get("/api/etat").json() == {"etat": etat}

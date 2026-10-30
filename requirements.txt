@@ -4,3 +4,4 @@ uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 httpx>=0.27
 pillow>=10
+psycopg[binary]>=3.2

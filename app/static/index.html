@@ -75,8 +75,36 @@ function sauver() {
   try {
     localStorage.setItem("etat", JSON.stringify(etat));
     for (const c of CHAMPS) localStorage.setItem(c, $(c).value);
+    localStorage.setItem("drive", $("drive").checked ? "1" : "0");
+  } catch {}
+  if (!synchro) return;
+  clearTimeout(envoi);
+  envoi = setTimeout(envoyer, 1000);
+}
+
+// Synchronisation avec le serveur : mêmes bons et besoins sur le PC et le téléphone
+let synchro = false, envoi = null;
+const instantane = () => ({ etat, champs: Object.fromEntries(CHAMPS.map((c) => [c, $(c).value])), drive: $("drive").checked });
+function envoyer() {
+  envoi = null;
+  fetch("/api/etat", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(instantane()) })
+    .catch(() => {});
+}
+async function synchroniser() {
+  if (envoi) return; // une modification locale part dans un instant : elle prime
+  try {
+    const { etat: serveur } = await (await fetch("/api/etat")).json();
+    if (serveur) {
+      Object.assign(etat, serveur.etat);
+      for (const c of CHAMPS) $(c).value = serveur.champs?.[c] ?? "";
+      $("drive").checked = serveur.drive !== false;
+      purgerExpirees(); afficherOffres(); afficherHistorique();
+    }
+    synchro = true;
+    sauver(); // premier lancement : ce qui était sur cet appareil part sur le serveur
   } catch {}
 }
+document.addEventListener("visibilitychange", () => { if (!document.hidden) synchroniser(); });
 function esc(s) { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
 
 const LIBELLES = { bon: "Bons", challenge: "Challenges", avantage: "Avantages", promo: "Promos" };
@@ -188,7 +216,7 @@ $("offres").onclick = (e) => {
 
 $("btn-vider").onclick = () => { etat.offres = []; etat.solde_cagnotte = null; sauver(); afficherOffres(); };
 for (const c of CHAMPS) $(c).oninput = sauver;
-$("drive").onchange = () => { try { localStorage.setItem("drive", $("drive").checked ? "1" : "0"); } catch {} };
+$("drive").onchange = sauver;
 
 $("btn-panier").onclick = async () => {
   $("btn-panier").disabled = true;
@@ -245,6 +273,7 @@ async function suivreLecture() {
 
 suivreLecture();
 charger(); purgerExpirees(); sauver(); afficherOffres(); afficherHistorique();
+synchroniser();
 </script>
 </body>
 </html>
