@@ -56,6 +56,13 @@ def ecrire(cle: str, valeur: str) -> None:
     _memoire[cle] = valeur
 
 
+def cles(prefixe: str) -> list[str]:
+    if os.environ.get("DATABASE_URL"):
+        with _base() as c:
+            return [l[0] for l in c.execute("SELECT cle FROM stockage WHERE cle LIKE %s", (prefixe + "%",))]
+    return [f"{prefixe}{f.stem}" for f in (DOSSIER / prefixe).glob("*.json")]
+
+
 def supprimer(cle: str) -> None:
     _memoire.pop(cle, None)
     if os.environ.get("DATABASE_URL"):

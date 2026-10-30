@@ -54,6 +54,7 @@ class LignePanier(BaseModel):
     economie_estimee: float = Field(description="Économie estimée en € pour la ligne, 0 si aucune")
     dont_cagnotte: float = Field(default=0, description="Part de economie_estimee créditée en cagnotte, en €")
     offres_utilisees: list[str] = Field(description="remise_texte des offres utilisées")
+    canal: Literal["magasin", "drive"] = Field(default="magasin", description="Où acheter ce produit")
     besoin: bool = Field(description="true si la ligne répond à un besoin listé, false si c'est une opportunité")
     raison: str
 
@@ -85,7 +86,7 @@ class DemandePanier(BaseModel):
     offres: list[Offre]
     solde_cagnotte: float | None = None
     carte_pass: bool = True
-    drive: bool = Field(default=True, description="false : courses en magasin uniquement, offres drive ignorées")
+    canal: Literal["magasin", "drive", "les_deux"] = "les_deux"
     habituels: list[str] = []
     stock: list[str] = []
     historique: list[Releve] = []

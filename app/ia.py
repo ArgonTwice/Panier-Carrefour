@@ -95,6 +95,13 @@ Règles :
 - Les prix sont des estimations : mets null si tu n'as aucune base pour estimer."""
 
 
+CANAUX = {
+    "magasin": "en magasin uniquement : ne propose ni drive ni livraison, canal de chaque ligne = magasin",
+    "drive": "en drive uniquement (commande en ligne) : canal de chaque ligne = drive",
+    "les_deux": "magasin ou drive : pour chaque ligne, mets dans canal où elle revient le moins cher. Ne coupe les courses "
+                "en deux (une partie en magasin, une en drive) que si le gain dépasse quelques euros ; sinon tout au même endroit",
+}
+
 _instance = None
 _verrou = threading.Lock()
 
@@ -218,15 +225,16 @@ def lire_catalogue(catalogue: Catalogue, pages: list[tuple[bytes, str]], par_app
 
 def composer_panier(demande: DemandePanier) -> Panier:
     offres = demande.offres + (AVANTAGES_PASS if demande.carte_pass else [])
-    if not demande.drive:
-        offres = [o for o in offres if o.canal != "drive"]
+    # Offres réservées à l'autre canal retirées d'office : le modèle ne peut pas s'y tromper
+    if demande.canal != "les_deux":
+        offres = [o for o in offres if o.canal in (None, "tous", demande.canal)]
     prompt = PROMPT_PANIER.format(
         besoins=", ".join(demande.besoins) or "aucun précisé",
         habituels=", ".join(demande.habituels) or "non précisés",
         stock=", ".join(demande.stock) or "non précisé",
         budget=f"{demande.budget} €" if demande.budget else "non précisé",
         cagnotte=f"{demande.solde_cagnotte} €" if demande.solde_cagnotte else "inconnue",
-        canal="magasin ou drive" if demande.drive else "en magasin uniquement : ne propose ni drive ni livraison",
+        canal=CANAUX[demande.canal],
         offres=json.dumps([annoter(o, demande.historique) for o in offres], ensure_ascii=False),
     )
     return totaliser(_parse(prompt, PropositionPanier), demande.budget)

@@ -34,7 +34,9 @@ lecture = {"en_cours": False, "erreur": None, "catalogue": None}
 def lire_en_fond():
     """Lit un à un les catalogues pas encore en cache ; s'arrête net si le quota du jour est atteint."""
     try:
-        for c in catalogues.catalogues_en_cours():
+        en_cours = catalogues.catalogues_en_cours()
+        catalogues.purger(en_cours)
+        for c in en_cours:
             if catalogues.est_en_cache(c):
                 continue
             lecture["catalogue"] = c.titre

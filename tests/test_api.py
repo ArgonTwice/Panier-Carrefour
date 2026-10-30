@@ -395,7 +395,7 @@ def test_panier_magasin_seulement(monkeypatch):
     monkeypatch.setattr(ia, "_parse", lambda content, fmt, **_: prompts.append(content) or PropositionPanier(
         lignes=[], a_faire=[], offres_ecartees=[]))
     drive = OFFRE.model_copy(update={"canal": "drive", "remise_texte": "BON DRIVE"})
-    ia.composer_panier(DemandePanier(besoins=["lait"], offres=[OFFRE, drive], drive=False))
+    ia.composer_panier(DemandePanier(besoins=["lait"], offres=[OFFRE, drive], canal="magasin"))
     assert "BON DRIVE" not in prompts[0] and "mercredis des produits frais" not in prompts[0]
     assert "en magasin uniquement" in prompts[0]
 
@@ -409,7 +409,27 @@ def test_mot_de_passe_en_ligne(monkeypatch):
 
 def test_etat_partage_entre_appareils():
     assert client.get("/api/etat").json() == {"etat": None}
-    etat = {"etat": {"offres": [], "historique": []}, "champs": {"besoins": "pâtes"}, "drive": False}
+    etat = {"etat": {"offres": [], "historique": []}, "champs": {"besoins": "pâtes", "canal": "magasin"}}
     assert client.put("/api/etat", json=etat).status_code == 200
     stockage._memoire.clear()  # relu depuis le disque, comme après un redémarrage
     assert client.get("/api/etat").json() == {"etat": etat}
+
+
+def test_panier_drive_seulement(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(ia, "_parse", lambda content, fmt, **_: prompts.append(content) or PropositionPanier(
+        lignes=[], a_faire=[], offres_ecartees=[]))
+    magasin = OFFRE.model_copy(update={"canal": "magasin", "remise_texte": "BON MAGASIN"})
+    ia.composer_panier(DemandePanier(besoins=["lait"], offres=[magasin], canal="drive"))
+    assert "BON MAGASIN" not in prompts[0] and "mercredis des produits frais" in prompts[0]
+
+
+def test_catalogues_termines_supprimes():
+    cats = [catalogues.Catalogue(id=i, titre="T", debut=None, fin=None, couverture="") for i in (1, 2)]
+    for c in cats:
+        catalogues.lire_avec_cache(c, lambda c: (Extraction(solde_cagnotte=None, offres=[OFFRE]), True))
+    catalogues.purger([])  # site injoignable : rien n'est supprimé
+    assert all(catalogues.est_en_cache(c) for c in cats)
+    catalogues.purger(cats[1:])
+    stockage._memoire.clear()
+    assert not catalogues.est_en_cache(cats[0]) and catalogues.est_en_cache(cats[1])

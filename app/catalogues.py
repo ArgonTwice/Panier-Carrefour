@@ -127,6 +127,17 @@ def offres_en_cache(catalogue: Catalogue) -> list[Offre]:
         return []
 
 
+def purger(en_cours: list[Catalogue]) -> None:
+    """Supprime les catalogues lus qui ne sont plus en cours (date passée)."""
+    if not en_cours:
+        return  # liste vide : site injoignable plutôt que plus aucun catalogue, on ne touche à rien
+    gardes = {_cle(c) for c in en_cours}
+    for cle in stockage.cles("catalogues/"):
+        if cle not in gardes:
+            stockage.supprimer(cle)
+            log.info("Catalogue terminé supprimé : %s", cle)
+
+
 def lire_avec_cache(catalogue: Catalogue, lire) -> list[Offre]:
     """Un catalogue ne change pas : on ne le fait lire qu'une fois par l'IA.
 

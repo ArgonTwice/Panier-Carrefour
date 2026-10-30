@@ -25,22 +25,38 @@
   .grand { width: 100%; padding: 14px; font-size: 1.1rem; }
   #statut { position: sticky; top: 0; background: var(--bg); margin: 0; padding: 4px 0; }
   .x { background: none; color: var(--muted); padding: 0 6px; float: right; }
+  select { width: 100%; padding: 8px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  .ligne { display: flex; gap: 12px; margin: 12px 0; } .ligne label { flex: 1; }
+  details { margin-top: 1.5rem; } summary { cursor: pointer; padding: 6px 0; }
+  .secondaire { background: none; color: var(--accent); border: 1px solid var(--accent); }
+  .coche strong { text-decoration: line-through; opacity: .5; }
+  /* Mode courses : seulement la liste, en gros, pour cocher en rayon */
+  body.courses #saisie, body.courses details, body.courses .detail, body.courses h1 { display: none; }
+  body.courses li { font-size: 1.3rem; padding: 14px 0; }
+  body.courses input[type=checkbox] { transform: scale(1.7); margin-right: 12px; }
 </style>
 </head>
 <body>
-<h1>Panier Carrefour</h1>
+<h1>🛒 Panier Carrefour</h1>
 <p id="statut"></p>
 
-<textarea id="besoins" rows="4" placeholder="Mes besoins de la semaine, un par ligne : lait, pâtes, lessive…"></textarea>
-<p><label>Budget (€) <input type="number" id="budget" min="0" step="1"></label></p>
-<p><label><input type="checkbox" id="drive" style="width:auto" checked> Je peux passer par le drive
-<span class="muted">(décoché : seulement les promos valables en magasin)</span></label></p>
+<div id="saisie">
+<textarea id="besoins" rows="4" placeholder="Ce qu'il te faut cette semaine, un par ligne : lait, pâtes, lessive…"></textarea>
+<div class="ligne">
+  <label>Budget (€) <input type="number" id="budget" min="0" step="1"></label>
+  <label>Où ? <select id="canal">
+    <option value="les_deux">Les deux</option>
+    <option value="magasin">🏬 Magasin</option>
+    <option value="drive">🚗 Drive</option>
+  </select></label>
+</div>
 <p><button id="btn-panier" class="grand">🛒 Préparer mon panier</button></p>
-<p class="muted">Lit tout seul les catalogues de la semaine, puis compose le panier avec tes offres perso.
-<br><span id="progression"></span></p>
+<p class="muted" id="progression"></p>
+</div>
 <div id="panier"></div>
 
-<h2>Mes offres perso</h2>
+<details>
+<summary><strong>Mes bons et challenges</strong> <span id="nb-offres" class="muted"></span></summary>
 <p class="muted">Le plus simple : dans l'appli Carrefour, lance l'<strong>enregistrement d'écran</strong> du téléphone, fais défiler
 tes bons (onglets magasin et drive) puis tes challenges, arrête, et choisis la vidéo ici. Une seule vidéo suffit.
 Tu peux aussi choisir plusieurs captures d'un coup. Les offres expirées disparaissent toutes seules.</p>
@@ -48,6 +64,7 @@ Tu peux aussi choisir plusieurs captures d'un coup. Les offres expirées dispara
 <p id="cagnotte" class="muted"></p>
 <ul id="offres"></ul>
 <p><button id="btn-vider" class="x" style="float:none">Tout effacer</button></p>
+</details>
 
 <details>
 <summary><strong>Mes habitudes</strong></summary>
@@ -61,21 +78,19 @@ Tu peux aussi choisir plusieurs captures d'un coup. Les offres expirées dispara
 <script>
 const $ = (id) => document.getElementById(id);
 const etat = { offres: [], solde_cagnotte: null, historique: [] };
-const CHAMPS = ["besoins", "budget", "habituels", "stock"];
+const CHAMPS = ["besoins", "budget", "canal", "habituels", "stock"];
 const lignes = (id) => $(id).value.split("\n").map((s) => s.trim()).filter(Boolean);
 
 function charger() {
   try {
     Object.assign(etat, JSON.parse(localStorage.getItem("etat") || "{}"));
-    for (const c of CHAMPS) $(c).value = localStorage.getItem(c) || "";
-    $("drive").checked = localStorage.getItem("drive") !== "0";
+    for (const c of CHAMPS) if (localStorage.getItem(c)) $(c).value = localStorage.getItem(c);
   } catch {}
 }
 function sauver() {
   try {
     localStorage.setItem("etat", JSON.stringify(etat));
     for (const c of CHAMPS) localStorage.setItem(c, $(c).value);
-    localStorage.setItem("drive", $("drive").checked ? "1" : "0");
   } catch {}
   if (!synchro) return;
   clearTimeout(envoi);
@@ -84,7 +99,7 @@ function sauver() {
 
 // Synchronisation avec le serveur : mêmes bons et besoins sur le PC et le téléphone
 let synchro = false, envoi = null;
-const instantane = () => ({ etat, champs: Object.fromEntries(CHAMPS.map((c) => [c, $(c).value])), drive: $("drive").checked });
+const instantane = () => ({ etat, champs: Object.fromEntries(CHAMPS.map((c) => [c, $(c).value])) });
 function envoyer() {
   envoi = null;
   fetch("/api/etat", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(instantane()) })
@@ -96,9 +111,8 @@ async function synchroniser() {
     const { etat: serveur } = await (await fetch("/api/etat")).json();
     if (serveur) {
       Object.assign(etat, serveur.etat);
-      for (const c of CHAMPS) $(c).value = serveur.champs?.[c] ?? "";
-      $("drive").checked = serveur.drive !== false;
-      purgerExpirees(); afficherOffres(); afficherHistorique();
+      for (const c of CHAMPS) if (serveur.champs?.[c] != null) $(c).value = serveur.champs[c];
+      purgerExpirees(); afficherOffres(); afficherHistorique(); afficherPanier();
     }
     synchro = true;
     sauver(); // premier lancement : ce qui était sur cet appareil part sur le serveur
@@ -126,6 +140,7 @@ function details(o) {
 }
 
 function afficherOffres() {
+  $("nb-offres").textContent = etat.offres.length ? `(${etat.offres.length})` : "· ajoute-les ici";
   $("cagnotte").textContent = etat.solde_cagnotte != null ? `Cagnotte : ${etat.solde_cagnotte} €` : "";
   if (!etat.offres.length) { $("offres").innerHTML = '<li class="muted">Aucune offre pour l\'instant.</li>'; return; }
   $("offres").innerHTML = Object.entries(LIBELLES).map(([type, libelle]) => {
@@ -216,7 +231,7 @@ $("offres").onclick = (e) => {
 
 $("btn-vider").onclick = () => { etat.offres = []; etat.solde_cagnotte = null; sauver(); afficherOffres(); };
 for (const c of CHAMPS) $(c).oninput = sauver;
-$("drive").onchange = sauver;
+$("canal").onchange = sauver;
 
 $("btn-panier").onclick = async () => {
   $("btn-panier").disabled = true;
@@ -239,24 +254,52 @@ async function preparer() {
       budget: $("budget").value ? +$("budget").value : null,
       offres: [...etat.offres, ...semaine.offres],
       solde_cagnotte: etat.solde_cagnotte,
-      drive: $("drive").checked,
+      canal: $("canal").value,
     }),
   }, `Composition du panier avec ${semaine.offres.length} promos de ${semaine.catalogues.length} catalogues…`);
+  etat.panier = { ...p, coches: [] };
+  sauver(); afficherPanier();
+}
+
+const CANAL = { magasin: "🏬 En magasin", drive: "🚗 En drive" };
+
+// Le dernier panier est gardé (et synchronisé) : on le retrouve sur le téléphone en arrivant au magasin
+function afficherPanier() {
+  const p = etat.panier;
+  if (!p) { $("panier").innerHTML = ""; return; }
+  const groupes = Object.keys(CANAL).map((canal) => [canal, p.lignes.map((l, i) => [l, i]).filter(([l]) => (l.canal || "magasin") === canal)])
+    .filter(([, lignes]) => lignes.length);
   $("panier").innerHTML = `
+    <p><button id="btn-courses" class="grand secondaire">${document.body.classList.contains("courses") ? "✓ Terminer les courses" : "🧺 Mode courses (liste en gros)"}</button></p>
+    <div class="detail">
     <p><strong>Total estimé : ${p.total_estime} €</strong> · <span class="eco">Économie : ${p.economie_totale} €</span>
     ${p.economie_cagnotte ? `<br><span class="muted">dont ${p.economie_cagnotte} € en cagnotte, ${(p.economie_totale - p.economie_cagnotte).toFixed(2)} € en caisse</span>` : ""}
     ${p.hors_budget ? '<br><span class="err">Dépasse le budget</span>' : ""}</p>
     ${p.quand_commander ? `<p>🗓️ ${esc(p.quand_commander)}</p>` : ""}
-    ${p.a_faire.length ? `<h2>À faire avant les courses</h2><ul>${p.a_faire.map((a) => `<li>☐ ${esc(a)}</li>`).join("")}</ul>` : ""}
-    <h2>Liste</h2>
-    <ul>${p.lignes.map((l) => `
-      <li><label><input type="checkbox" style="width:auto"> <strong>${l.quantite} × ${esc(l.produit)}</strong></label>
-        ${l.besoin ? "" : " <span class='muted'>(opportunité)</span>"}
-        ${l.economie_estimee ? ` <span class="eco">−${l.economie_estimee} €</span>` : ""}
-        <div class="muted">${esc(l.raison)}${l.offres_utilisees.length ? " · " + l.offres_utilisees.map(esc).join(", ") : ""}</div>
-      </li>`).join("")}</ul>
-    ${p.offres_ecartees.length ? `<details><summary class="muted">Offres écartées (${p.offres_ecartees.length})</summary><ul>${p.offres_ecartees.map((o) => `<li class="muted">${esc(o)}</li>`).join("")}</ul></details>` : ""}`;
+    ${p.a_faire.length ? `<h2>À faire avant</h2><ul>${p.a_faire.map((a) => `<li>☐ ${esc(a)}</li>`).join("")}</ul>` : ""}
+    </div>
+    ${groupes.map(([canal, lignes]) => `
+      <h2>${CANAL[canal]} <span class="muted">· ${lignes.reduce((t, [l]) => t + (l.prix_estime || 0), 0).toFixed(2)} €</span></h2>
+      <ul>${lignes.map(([l, i]) => `
+        <li class="${p.coches[i] ? "coche" : ""}"><label><input type="checkbox" data-ligne="${i}" style="width:auto" ${p.coches[i] ? "checked" : ""}>
+          <strong>${l.quantite} × ${esc(l.produit)}</strong></label>
+          ${l.economie_estimee ? ` <span class="eco">−${l.economie_estimee} €</span>` : ""}
+          <div class="muted detail">${l.besoin ? "" : "Opportunité · "}${esc(l.raison)}${l.offres_utilisees.length ? " · " + l.offres_utilisees.map(esc).join(", ") : ""}</div>
+        </li>`).join("")}</ul>`).join("")}
+    ${p.offres_ecartees.length ? `<details class="detail"><summary class="muted">Offres écartées (${p.offres_ecartees.length})</summary><ul>${p.offres_ecartees.map((o) => `<li class="muted">${esc(o)}</li>`).join("")}</ul></details>` : ""}`;
 }
+
+$("panier").onclick = (e) => {
+  if (e.target.id === "btn-courses") {
+    document.body.classList.toggle("courses");
+    scrollTo(0, 0);
+    afficherPanier();
+  } else if (e.target.dataset.ligne !== undefined) {
+    etat.panier.coches[+e.target.dataset.ligne] = e.target.checked;
+    e.target.closest("li").classList.toggle("coche", e.target.checked);
+    sauver();
+  }
+};
 
 // Les catalogues sont lus en arrière-plan dès le lancement : on affiche où en est la lecture
 async function suivreLecture() {
@@ -272,7 +315,7 @@ async function suivreLecture() {
 }
 
 suivreLecture();
-charger(); purgerExpirees(); sauver(); afficherOffres(); afficherHistorique();
+charger(); purgerExpirees(); sauver(); afficherOffres(); afficherHistorique(); afficherPanier();
 synchroniser();
 </script>
 </body>
