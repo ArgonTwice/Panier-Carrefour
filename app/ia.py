@@ -102,6 +102,7 @@ def _client() -> genai.Client:
 def _parse(contents, schema, reflexion=types.ThinkingLevel.LOW, delai=120):
     # Clé lue dans GEMINI_API_KEY par le SDK. Réflexion réduite et délai max : sans eux un appel peut durer des minutes
     debut = time.monotonic()
+    log.info("Gemini : envoi %s (%d éléments)…", schema.__name__, len(contents) if isinstance(contents, list) else 1)
     try:
         reponse = _client().models.generate_content(
             model=MODEL,

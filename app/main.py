@@ -17,6 +17,10 @@ TYPES_IMAGE = {"image/png", "image/jpeg", "image/webp", "image/heic", "image/hei
 MAX_CAPTURES = 10
 
 log = logging.getLogger("uvicorn.error")
+# Affiche chaque requête HTTP vers Gemini et ses réessais (429, 503) dans la fenêtre noire
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s:     %(message)s")
+for nom in ("httpx", "google_genai"):
+    logging.getLogger(nom).setLevel(logging.INFO)
 
 
 lecture = {"en_cours": False, "erreur": None, "catalogue": None}
