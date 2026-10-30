@@ -3,7 +3,7 @@
   "short_name": "Panier",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#161616",
+  "background_color": "#0a5cad",
   "theme_color": "#0a5cad",
   "icons": [
     {"src": "icone-192.png", "sizes": "192x192", "type": "image/png"},

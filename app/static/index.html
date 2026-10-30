@@ -9,43 +9,89 @@
 <link rel="apple-touch-icon" href="icone-192.png">
 <meta name="theme-color" content="#0a5cad">
 <style>
-  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --line: #ddd; --accent: #0a5cad; --ok: #1d7a3a; --warn: #b3261e; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #161616; --fg: #eee; --muted: #999; --line: #333; --accent: #6aa8f0; --ok: #5cc27a; --warn: #f28b82; } }
+  :root {
+    --bg: #f2f4f8; --carte: #fff; --champ: #f7f8fb; --fg: #172033; --muted: #677189; --line: #e3e7ef;
+    --accent: #0a5cad; --btn: #0a5cad; --accent-doux: #e8f0fa; --rouge: #e2231a;
+    --ok: #157a3b; --ok-doux: #e2f4e8; --warn: #b3261e; --alerte: #fff3d6; --alerte-fg: #5c4400;
+    --ombre: 0 1px 2px rgba(23, 32, 51, .06), 0 4px 16px rgba(23, 32, 51, .06);
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg: #0d1016; --carte: #171b23; --champ: #10141b; --fg: #e8ebf2; --muted: #98a1b4; --line: #272d39;
+    --accent: #7db0ff; --btn: #2b6fd0; --accent-doux: #1b2a40; --rouge: #ff5a52;
+    --ok: #5fd08a; --ok-doux: #15291d; --warn: #ff8a80; --alerte: #3a2f12; --alerte-fg: #ffe08a;
+    --ombre: 0 1px 2px rgba(0, 0, 0, .4);
+  } }
   * { box-sizing: border-box; }
-  body { margin: 0 auto; max-width: 640px; padding: 16px; font: 16px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
-  h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 2rem; }
-  textarea, input { width: 100%; padding: 8px; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 6px; }
-  button { padding: 10px 16px; font: inherit; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
-  button:disabled { opacity: .5; }
-  ul { padding-left: 0; list-style: none; }
-  li { padding: 8px 0; border-bottom: 1px solid var(--line); }
-  .muted { color: var(--muted); font-size: .9rem; }
-  .eco { color: var(--ok); font-weight: 600; }
+  html { background: var(--bg); }
+  body { margin: 0 auto; max-width: 640px; padding: 0 16px 32px; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--fg); -webkit-tap-highlight-color: transparent; }
+  .entete { margin: 0 -16px 16px; padding: 20px 20px 18px; color: #fff; border-radius: 0 0 22px 22px;
+            background: linear-gradient(135deg, #0a5cad 0%, #0b4a8c 100%); box-shadow: inset 0 -4px 0 var(--rouge); }
+  .entete h1 { margin: 0; font-size: 1.35rem; letter-spacing: -.01em; }
+  .entete p { margin: 2px 0 0; opacity: .8; font-size: .9rem; }
+  h2 { font-size: 1.05rem; margin: 1.4rem 0 .4rem; }
+  .carte { background: var(--carte); border-radius: 18px; padding: 16px; margin: 0 0 14px; box-shadow: var(--ombre); }
+  .titre { display: block; font-weight: 650; margin-bottom: 8px; }
+  textarea, input, select { width: 100%; padding: 12px; font: inherit; color: inherit; background: var(--champ);
+                            border: 1px solid var(--line); border-radius: 12px; outline: none; transition: border-color .15s, box-shadow .15s; }
+  textarea:focus, input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-doux); }
+  textarea { resize: vertical; }
+  label { font-size: .9rem; color: var(--muted); }
+  label textarea, label input, label select { margin-top: 4px; color: var(--fg); }
+  button { padding: 12px 16px; font: inherit; font-weight: 600; border: 0; border-radius: 12px; background: var(--btn); color: #fff;
+           cursor: pointer; transition: transform .08s, filter .15s; }
+  button:active { transform: scale(.98); }
+  button:disabled { opacity: .6; cursor: progress; }
+  .grand { width: 100%; padding: 15px; font-size: 1.08rem; border-radius: 14px; }
+  #btn-panier { box-shadow: 0 6px 18px rgba(10, 92, 173, .28); }
+  .secondaire { background: var(--accent-doux); color: var(--accent); }
+  .outils { display: flex; gap: 8px; margin-top: 10px; } .outils button { flex: 1; }
+  .ligne { display: flex; gap: 10px; margin: 14px 0; } .ligne label { flex: 1; }
+  ul { padding-left: 0; list-style: none; margin: 0; }
+  li { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  li:last-child { border-bottom: 0; }
+  p { margin: .6rem 0; }
+  .muted { color: var(--muted); font-size: .88rem; }
+  .eco { display: inline-block; color: var(--ok); background: var(--ok-doux); font-weight: 650; font-size: .85rem; padding: 1px 8px; border-radius: 999px; }
   .err { color: var(--warn); }
-  .grand { width: 100%; padding: 14px; font-size: 1.1rem; }
-  #statut { position: sticky; top: 0; background: var(--bg); margin: 0; padding: 4px 0; }
-  .x { background: none; color: var(--muted); padding: 0 6px; float: right; }
-  select { width: 100%; padding: 8px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
-  .ligne { display: flex; gap: 12px; margin: 12px 0; } .ligne label { flex: 1; }
-  details { margin-top: 1.5rem; } summary { cursor: pointer; padding: 6px 0; }
-  .secondaire { background: none; color: var(--accent); border: 1px solid var(--accent); }
-  .outils { display: flex; gap: 8px; margin-top: 8px; } .outils button { flex: 1; }
-  #alertes { background: #fff4d6; color: #5a4300; border-radius: 6px; padding: 8px 12px; }
-  #alertes:empty { display: none; }
   .ok { color: var(--ok); }
-  .coche strong { text-decoration: line-through; opacity: .5; }
+  #statut { position: sticky; top: 8px; z-index: 2; margin: 0 0 10px; padding: 10px 14px; border-radius: 12px;
+            background: var(--carte); box-shadow: var(--ombre); font-size: .92rem; }
+  #statut:empty, #progression:empty { display: none; }
+  #alertes { background: var(--alerte); color: var(--alerte-fg); border-radius: 14px; padding: 12px 14px; margin: 0 0 14px; }
+  #alertes:empty { display: none; }
+  #progression { margin: 10px 0 0; }
+  .x { background: none; color: var(--muted); padding: 2px 6px; float: right; font-weight: 400; }
+  details.carte { padding: 0 16px; }
+  summary { cursor: pointer; padding: 16px 0; list-style: none; display: flex; align-items: center; gap: 8px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "›"; margin-left: auto; font-size: 1.4rem; line-height: 1; color: var(--muted); transition: transform .2s; }
+  details[open] > summary::after { transform: rotate(90deg); }
+  details.carte[open] { padding-bottom: 12px; }
+  li details summary { padding: 4px 0; }
+  .resume { display: flex; gap: 10px; margin-bottom: 4px; }
+  .resume div { flex: 1; background: var(--champ); border-radius: 14px; padding: 10px 12px; }
+  .resume strong { display: block; font-size: 1.35rem; letter-spacing: -.01em; }
+  .resume .gain strong { color: var(--ok); }
+  .quand { background: var(--accent-doux); border-radius: 12px; padding: 10px 12px; }
+  input[type=checkbox] { width: 22px; height: 22px; margin: 0 10px 0 0; vertical-align: -5px; accent-color: var(--ok); }
+  li label { color: var(--fg); font-size: 1rem; }
+  .coche strong { text-decoration: line-through; opacity: .45; }
+  input[type=file] { padding: 10px; font-size: .9rem; }
   /* Mode courses : seulement la liste, en gros, pour cocher en rayon */
-  body.courses #saisie, body.courses details, body.courses .detail, body.courses h1 { display: none; }
+  body.courses #saisie, body.courses details, body.courses .detail, body.courses .entete, body.courses #zone-ticket { display: none; }
+  body.courses { padding-top: 12px; }
   body.courses li { font-size: 1.3rem; padding: 14px 0; }
-  body.courses input[type=checkbox] { transform: scale(1.7); margin-right: 12px; }
+  body.courses input[type=checkbox] { transform: scale(1.4); margin-right: 14px; }
 </style>
 </head>
 <body>
-<h1>🛒 Panier Carrefour</h1>
+<header class="entete"><h1>🛒 Panier Carrefour</h1><p id="semaine"></p></header>
 <p id="statut"></p>
 <p id="alertes"></p>
 
-<div id="saisie">
+<div id="saisie" class="carte">
+<label class="titre" for="besoins">Ma liste de la semaine</label>
 <textarea id="besoins" rows="4" placeholder="Ce qu'il te faut cette semaine, un par ligne : lait, pâtes, lessive…"></textarea>
 <div class="outils">
   <button id="btn-voix" class="secondaire" hidden>🎤 Dicter</button>
@@ -59,17 +105,17 @@
     <option value="drive">🚗 Drive</option>
   </select></label>
 </div>
-<p><button id="btn-panier" class="grand">🛒 Préparer mon panier</button></p>
+<button id="btn-panier" class="grand">🛒 Préparer mon panier</button>
 <p class="muted" id="progression"></p>
-<p><button id="btn-notifs" class="secondaire" hidden>🔔 Me prévenir sur ce téléphone</button>
+<p><button id="btn-notifs" style="width:100%" class="secondaire" hidden>🔔 Me prévenir sur ce téléphone</button>
 <span id="aide-notifs" class="muted" hidden>Pour être prévenu (panier du mardi, bons qui expirent) : ajoute l'appli à l'écran d'accueil, puis ouvre-la de là.</span></p>
 </div>
 <div id="panier"></div>
-<p><button id="btn-ticket" class="grand secondaire">🧾 Photo du ticket de caisse</button>
+<p id="zone-ticket"><button id="btn-ticket" class="grand secondaire">🧾 Photo du ticket de caisse</button>
 <input type="file" id="ticket" accept="image/*" capture="environment" multiple hidden></p>
 
-<details>
-<summary><strong>Mes bons et challenges</strong> <span id="nb-offres" class="muted"></span></summary>
+<details class="carte">
+<summary><strong>🎟️ Mes bons et challenges</strong> <span id="nb-offres" class="muted"></span></summary>
 <p class="muted">Le plus simple : dans l'appli Carrefour, lance l'<strong>enregistrement d'écran</strong> du téléphone, fais défiler
 tes bons (onglets magasin et drive) puis tes challenges, arrête, et choisis la vidéo ici. Une seule vidéo suffit.
 Tu peux aussi choisir plusieurs captures d'un coup. Les offres expirées disparaissent toutes seules.</p>
@@ -79,8 +125,8 @@ Tu peux aussi choisir plusieurs captures d'un coup. Les offres expirées dispara
 <p><button id="btn-vider" class="x" style="float:none">Tout effacer</button></p>
 </details>
 
-<details id="habitudes">
-<summary><strong>Mes habitudes</strong></summary>
+<details id="habitudes" class="carte">
+<summary><strong>🏠 Mes habitudes</strong></summary>
 <p><label>Ce que j'achète d'habitude <span class="muted">(l'appli propose d'en stocker quand c'est au plus bas)</span>
 <textarea id="habituels" rows="4" placeholder="Café, pâtes, papier toilette, lessive…"></textarea></label></p>
 <p><label>Déjà en stock à la maison <span class="muted">(ne sera pas reproposé ; complété par tes tickets)</span>
@@ -291,23 +337,25 @@ const CANAL = { magasin: "🏬 En magasin", drive: "🚗 En drive" };
 // Le dernier panier est gardé (et synchronisé) : on le retrouve sur le téléphone en arrivant au magasin
 function afficherPanier() {
   const p = etat.panier;
+  $("panier").className = p ? "carte" : "";
   if (!p) { $("panier").innerHTML = ""; return; }
   const groupes = Object.keys(CANAL).map((canal) => [canal, p.lignes.map((l, i) => [l, i]).filter(([l]) => (l.canal || "magasin") === canal)])
     .filter(([, lignes]) => lignes.length);
   $("panier").innerHTML = `
-    <p><button id="btn-courses" class="grand secondaire">${document.body.classList.contains("courses") ? "✓ Terminer les courses" : "🧺 Mode courses (liste en gros)"}</button></p>
+    <p style="margin-top:0"><button id="btn-courses" class="grand secondaire">${document.body.classList.contains("courses") ? "✓ Terminer les courses" : "🧺 Mode courses (liste en gros)"}</button></p>
     <div class="detail">
     ${p.auto ? `<p class="muted">✨ Préparé tout seul le ${new Date(p.auto).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} avec les nouveaux catalogues</p>` : ""}
-    <p><strong>Total estimé : ${p.total_estime} €</strong> · <span class="eco">Économie : ${p.economie_totale} €</span>
-    ${p.economie_cagnotte ? `<br><span class="muted">dont ${p.economie_cagnotte} € en cagnotte, ${(p.economie_totale - p.economie_cagnotte).toFixed(2)} € en caisse</span>` : ""}
-    ${p.hors_budget ? '<br><span class="err">Dépasse le budget</span>' : ""}</p>
-    ${p.quand_commander ? `<p>🗓️ ${esc(p.quand_commander)}</p>` : ""}
+    <div class="resume">
+      <div><span class="muted">Total estimé</span><strong>${p.total_estime.toFixed(2)} €</strong>${p.hors_budget ? '<span class="err muted">Dépasse le budget</span>' : ""}</div>
+      <div class="gain"><span class="muted">Économie</span><strong>${p.economie_totale.toFixed(2)} €</strong>${p.economie_cagnotte ? `<span class="muted">dont ${p.economie_cagnotte.toFixed(2)} € en cagnotte</span>` : ""}</div>
+    </div>
+    ${p.quand_commander ? `<p class="quand">🗓️ ${esc(p.quand_commander)}</p>` : ""}
     ${p.a_faire.length ? `<h2>À faire avant</h2><ul>${p.a_faire.map((a) => `<li>☐ ${esc(a)}</li>`).join("")}</ul>` : ""}
     </div>
     ${groupes.map(([canal, lignes]) => `
       <h2>${CANAL[canal]} <span class="muted">· ${lignes.reduce((t, [l]) => t + (l.prix_estime || 0), 0).toFixed(2)} €</span></h2>
       <ul>${lignes.map(([l, i]) => `
-        <li class="${p.coches[i] ? "coche" : ""}"><label><input type="checkbox" data-ligne="${i}" style="width:auto" ${p.coches[i] ? "checked" : ""}>
+        <li class="${p.coches[i] ? "coche" : ""}"><label><input type="checkbox" data-ligne="${i}" ${p.coches[i] ? "checked" : ""}>
           <strong>${l.quantite} × ${esc(l.produit)}</strong></label>
           ${l.economie_estimee ? ` <span class="eco">−${l.economie_estimee} €</span>` : ""}
           <div class="muted detail">${l.besoin ? "" : "Opportunité · "}${esc(l.raison)}${l.offres_utilisees.length ? " · " + l.offres_utilisees.map(esc).join(", ") : ""}</div>
@@ -462,6 +510,10 @@ $("btn-notifs").onclick = async () => {
     $("statut").textContent = "Notifications refusées : autorise-les dans les réglages du navigateur.";
   }
 };
+
+// Semaine Carrefour : du mardi au lundi
+const mardi = new Date(); mardi.setDate(mardi.getDate() - ((mardi.getDay() + 5) % 7));
+$("semaine").textContent = `Semaine du mardi ${mardi.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}`;
 
 preparerNotifs().catch(() => {});
 suivreLecture();
