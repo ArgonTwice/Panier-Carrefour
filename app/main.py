@@ -87,15 +87,16 @@ app = FastAPI(title="Panier Carrefour", lifespan=lifespan)
 
 
 def _autorise(request: Request) -> bool:
-    # En ligne, APP_MOT_DE_PASSE protège l'appli (et donc la clé Gemini) ; en local il n'est pas défini
-    attendu = os.environ.get("APP_MOT_DE_PASSE")
-    if not attendu:
+    # En ligne, APP_MOT_DE_PASSE protège l'appli (et donc la clé Gemini) ; en local il n'est pas défini.
+    # Un mot de passe par personne, séparés par des virgules : "le_mien,le_sien". Les données restent communes
+    attendus = [m.strip() for m in os.environ.get("APP_MOT_DE_PASSE", "").split(",") if m.strip()]
+    if not attendus:
         return True
     try:
         _, mot_de_passe = base64.b64decode(request.headers["authorization"].removeprefix("Basic ")).decode().split(":", 1)
     except (KeyError, ValueError):
         return False
-    return secrets.compare_digest(mot_de_passe.encode(), attendu.encode())
+    return any(secrets.compare_digest(mot_de_passe.encode(), m.encode()) for m in attendus)
 
 
 @app.middleware("http")

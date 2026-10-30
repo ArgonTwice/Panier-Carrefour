@@ -42,7 +42,7 @@ pytest
 ## Sur le téléphone (Render, gratuit)
 
 1. Sur render.com, inscris-toi avec GitHub, puis New > Blueprint > ce dépôt.
-2. Renseigne `GEMINI_API_KEY` (ta clé), `APP_MOT_DE_PASSE` (au choix) et `DATABASE_URL`
+2. Renseigne `GEMINI_API_KEY` (ta clé), `APP_MOT_DE_PASSE` (au choix ; un par personne séparés par une virgule, ex. `le_mien,le_sien`) et `DATABASE_URL`
    (base gratuite sur neon.tech : inscription avec GitHub, puis « Connection string »), puis Apply.
 3. Ouvre le lien `https://….onrender.com` sur le téléphone (n'importe quel identifiant + le mot de passe),
    puis « Ajouter à l'écran d'accueil ».

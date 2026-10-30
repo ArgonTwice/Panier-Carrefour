@@ -400,6 +400,13 @@ def test_mot_de_passe_en_ligne(monkeypatch):
     assert client.get("/", auth=("antho", "secret")).status_code == 200
 
 
+def test_un_mot_de_passe_par_personne(monkeypatch):
+    monkeypatch.setenv("APP_MOT_DE_PASSE", "secret, le_sien")
+    assert client.get("/", auth=("antho", "secret")).status_code == 200
+    assert client.get("/", auth=("elle", "le_sien")).status_code == 200
+    assert client.get("/", auth=("elle", "secret, le_sien")).status_code == 401
+
+
 def test_etat_partage_entre_appareils():
     assert client.get("/api/etat").json() == {"etat": None}
     etat = {"etat": {"offres": [], "historique": []}, "champs": {"besoins": "pâtes", "canal": "magasin"}}
