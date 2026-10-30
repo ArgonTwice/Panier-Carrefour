@@ -68,6 +68,7 @@ def test_panier(monkeypatch):
 
 
 def test_page_accueil():
+    assert client.get("/").headers["cache-control"] == "no-store"
     assert "Panier Carrefour" in client.get("/").text
 
 

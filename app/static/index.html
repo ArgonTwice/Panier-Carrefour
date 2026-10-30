@@ -140,8 +140,12 @@ function purgerExpirees() {
 }
 
 async function appel(url, options, message = "Analyse en cours…") {
-  $("statut").textContent = message;
   $("statut").className = "muted";
+  // Chrono : montre que l'appli travaille pendant les appels Gemini (jusqu'à 2 min)
+  const debut = Date.now();
+  const chrono = () => { const s = Math.round((Date.now() - debut) / 1000); $("statut").textContent = s ? `${message} ${s} s` : message; };
+  chrono();
+  const minuteur = setInterval(chrono, 1000);
   try {
     const r = await fetch(url, options);
     const texte = await r.text();
@@ -154,6 +158,8 @@ async function appel(url, options, message = "Analyse en cours…") {
     $("statut").textContent = "Erreur : " + e.message;
     $("statut").className = "err";
     throw e;
+  } finally {
+    clearInterval(minuteur);
   }
 }
 

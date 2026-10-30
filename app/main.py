@@ -62,6 +62,14 @@ async def lifespan(app):
 app = FastAPI(title="Panier Carrefour", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def sans_cache(request: Request, suite):
+    # Le navigateur recharge toujours la page : une mise à jour de l'appli est prise en compte tout de suite
+    reponse = await suite(request)
+    reponse.headers["Cache-Control"] = "no-store"
+    return reponse
+
+
 @app.exception_handler(Exception)
 async def erreur(request: Request, exc: Exception):
     log.exception("Erreur sur %s", request.url.path)
