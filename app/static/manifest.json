@@ -1,0 +1,12 @@
+{
+  "name": "Panier Carrefour",
+  "short_name": "Panier",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#161616",
+  "theme_color": "#0a5cad",
+  "icons": [
+    {"src": "icone-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icone-512.png", "sizes": "512x512", "type": "image/png"}
+  ]
+}

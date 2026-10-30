@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from fastapi.testclient import TestClient
+from google.genai import types
 
 from app import catalogues, historique, ia, main
 from app.models import (DemandePanier, Extraction, LectureCatalogue, LignePanier, Offre, PromoCatalogue,
@@ -91,7 +92,7 @@ def test_extraire_offres_appelle_gemini(monkeypatch):
     assert extraction.offres == [OFFRE]
     assert appel["config"].response_schema is Extraction
     assert appel["contents"][0].inline_data.mime_type == "image/png"
-    assert appel["config"].http_options.timeout == 90_000
+    assert appel["config"].http_options.timeout == 180_000
 
 
 def test_gemini_reessaie_sur_limite_par_minute(monkeypatch):
@@ -135,7 +136,7 @@ def test_gemini_trop_long(monkeypatch):
 
     monkeypatch.setattr(ia, "_instance", type("C", (), {"models": FauxModels()})())
     monkeypatch.setattr(ia.time, "sleep", lambda s: None)
-    with pytest.raises(RuntimeError, match="n'a pas répondu en 90 s"):
+    with pytest.raises(RuntimeError, match="n'a pas répondu en 180 s"):
         ia.extraire_offres([(b"img", "image/png")])
 
 
@@ -360,3 +361,34 @@ def test_cache_ancien_format_windows_et_illisible(monkeypatch, tmp_path):
     assert catalogues.offres_en_cache(cat)[0].produit == "Purée écrasée"
     (tmp_path / "8.json").write_bytes(b"{pas du json")
     assert catalogues.offres_en_cache(cat) == [] and not catalogues.est_en_cache(cat)
+
+
+def test_extraction_par_lots_et_video(monkeypatch):
+    appels, supprimes = [], []
+
+    class FauxFiles:
+        def upload(self, file, config):
+            return types.File(name="files/v1", state=types.FileState.ACTIVE)
+
+        def delete(self, name):
+            supprimes.append(name)
+
+    def faux_parse(contents, schema, **_):
+        appels.append(len(contents) - 1)
+        return Extraction(solde_cagnotte=12.5 if len(appels) == 2 else None, offres=[OFFRE])
+
+    monkeypatch.setattr(ia, "_instance", type("C", (), {"files": FauxFiles()})())
+    monkeypatch.setattr(ia, "_parse", faux_parse)
+    r = ia.extraire_offres([(b"i", "image/png")] * 20 + [(b"v", "video/mp4")])
+    assert appels == [15, 5, 1] and supprimes == ["files/v1"]
+    assert r.solde_cagnotte == 12.5 and r.offres == [OFFRE]  # doublons fusionnés
+
+
+def test_panier_magasin_seulement(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(ia, "_parse", lambda content, fmt, **_: prompts.append(content) or PropositionPanier(
+        lignes=[], a_faire=[], offres_ecartees=[]))
+    drive = OFFRE.model_copy(update={"canal": "drive", "remise_texte": "BON DRIVE"})
+    ia.composer_panier(DemandePanier(besoins=["lait"], offres=[OFFRE, drive], drive=False))
+    assert "BON DRIVE" not in prompts[0] and "mercredis des produits frais" not in prompts[0]
+    assert "en magasin uniquement" in prompts[0]

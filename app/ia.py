@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import os
@@ -32,8 +33,9 @@ class QuotaEpuise(RuntimeError):
 def _quota_journalier(e: Exception) -> bool:
     return "RESOURCE_EXHAUSTED" in str(e) and "PerDay" in str(e)
 
-PROMPT_EXTRACTION = """Ces captures viennent de l'appli Carrefour d'un client qui a la carte PASS et le Club Carrefour.
-Liste chaque offre visible, une seule fois même si elle apparaît sur plusieurs captures.
+PROMPT_EXTRACTION = """Ces captures (ou cette vidéo d'écran qui défile) viennent de l'appli Carrefour d'un client qui a
+la carte PASS et le Club Carrefour.
+Liste chaque offre visible, une seule fois même si elle apparaît sur plusieurs captures ou images de la vidéo.
 
 Repères pour classer les offres :
 - "bon" : coupon à activer ("1 ACHETÉ = 0,40 € DE REMISE", "2 ACHETÉS = 0,60 € D'ÉCONOMIES"). active=true si "Activé",
@@ -60,6 +62,7 @@ Produits achetés habituellement : {habituels}
 Déjà en stock à la maison : {stock}
 Budget : {budget}
 Cagnotte disponible : {cagnotte}
+Où faire les courses : {canal}
 
 Offres disponibles (JSON) :
 {offres}
@@ -70,6 +73,9 @@ Règles :
   "hors promotions en cours" ne se cumulent pas avec une promo : garde le plus intéressant des deux.
 - Respecte la quantité requise, les seuils d'achat, le canal (magasin ou drive) et le jour imposé par chaque offre.
   Si une offre impose un jour (ex. mercredi en drive), dis-le dans a_faire.
+- Le client a déjà la carte PASS et le Club Carrefour : ne lui conseille jamais de les activer ou d'y adhérer.
+- Une offre liée à un rayon ou à un jour (bébé, frais du mercredi…) ne compte que si un produit du panier en profite :
+  sinon, ne la cite ni dans quand_commander, ni dans a_faire.
 - Bons et challenges dont active=false : s'ils servent au panier, ajoute dans a_faire de les activer.
 - Challenges : "progression" donne le reste à acheter avant le prochain palier et son rendement (rendement_pct = part
   du reste rendue en cagnotte). Un rendement de 20 % ou plus sur des produits utiles ou qui se conservent vaut le coup ;
@@ -145,8 +151,40 @@ def _parse(contents, schema, delai=90, max_sortie=8192):
     return schema.model_validate_json(reponse.text)
 
 
-def extraire_offres(images: list[tuple[bytes, str]]) -> Extraction:
-    return _parse([*_parts(images), PROMPT_EXTRACTION], Extraction, max_sortie=16384)
+PAR_LOT = 15  # captures par requête : au-delà, la requête devient trop lourde
+
+
+def extraire_offres(fichiers: list[tuple[bytes, str]]) -> Extraction:
+    """Captures lues par lots de 15 ; chaque vidéo d'écran (défilement des bons) lue en une requête."""
+    images = [f for f in fichiers if not f[1].startswith("video/")]
+    lots = [_parts(images[i:i + PAR_LOT]) for i in range(0, len(images), PAR_LOT)]
+    resultats = [_parse([*lot, PROMPT_EXTRACTION], Extraction, delai=180, max_sortie=32768) for lot in lots]
+    for data, media_type in fichiers:
+        if media_type.startswith("video/"):
+            video = _envoyer_video(data, media_type)
+            try:
+                resultats.append(_parse([video, PROMPT_EXTRACTION], Extraction, delai=180, max_sortie=32768))
+            finally:
+                _client().files.delete(name=video.name)
+    # Une même offre vue sur plusieurs captures ou lots n'est gardée qu'une fois
+    offres = {(o.type, o.produit.lower(), (o.marque or "").lower(), o.remise_texte.lower()): o
+              for r in resultats for o in r.offres}
+    solde = next((r.solde_cagnotte for r in resultats if r.solde_cagnotte is not None), None)
+    return Extraction(solde_cagnotte=solde, offres=list(offres.values()))
+
+
+def _envoyer_video(data: bytes, media_type: str) -> types.File:
+    # Une vidéo passe par l'API Files de Gemini (trop lourde pour être envoyée dans la requête)
+    client = _client()
+    video = client.files.upload(file=io.BytesIO(data), config=types.UploadFileConfig(mime_type=media_type))
+    for _ in range(60):
+        if video.state != types.FileState.PROCESSING:
+            break
+        time.sleep(2)
+        video = client.files.get(name=video.name)
+    if video.state != types.FileState.ACTIVE:
+        raise RuntimeError("Gemini n'a pas pu lire la vidéo : essaie une vidéo plus courte ou des captures")
+    return video
 
 
 def _parts(images: list[tuple[bytes, str]]) -> list[types.Part]:
@@ -180,12 +218,15 @@ def lire_catalogue(catalogue: Catalogue, pages: list[tuple[bytes, str]], par_app
 
 def composer_panier(demande: DemandePanier) -> Panier:
     offres = demande.offres + (AVANTAGES_PASS if demande.carte_pass else [])
+    if not demande.drive:
+        offres = [o for o in offres if o.canal != "drive"]
     prompt = PROMPT_PANIER.format(
         besoins=", ".join(demande.besoins) or "aucun précisé",
         habituels=", ".join(demande.habituels) or "non précisés",
         stock=", ".join(demande.stock) or "non précisé",
         budget=f"{demande.budget} €" if demande.budget else "non précisé",
         cagnotte=f"{demande.solde_cagnotte} €" if demande.solde_cagnotte else "inconnue",
+        canal="magasin ou drive" if demande.drive else "en magasin uniquement : ne propose ni drive ni livraison",
         offres=json.dumps([annoter(o, demande.historique) for o in offres], ensure_ascii=False),
     )
     return totaliser(_parse(prompt, PropositionPanier), demande.budget)

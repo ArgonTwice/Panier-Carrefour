@@ -85,6 +85,7 @@ class DemandePanier(BaseModel):
     offres: list[Offre]
     solde_cagnotte: float | None = None
     carte_pass: bool = True
+    drive: bool = Field(default=True, description="false : courses en magasin uniquement, offres drive ignorées")
     habituels: list[str] = []
     stock: list[str] = []
     historique: list[Releve] = []

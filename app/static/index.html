@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Panier Carrefour</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icone-192.png">
+<link rel="apple-touch-icon" href="icone-192.png">
+<meta name="theme-color" content="#0a5cad">
 <style>
   :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --line: #ddd; --accent: #0a5cad; --ok: #1d7a3a; --warn: #b3261e; }
   @media (prefers-color-scheme: dark) { :root { --bg: #161616; --fg: #eee; --muted: #999; --line: #333; --accent: #6aa8f0; --ok: #5cc27a; --warn: #f28b82; } }
@@ -29,15 +33,18 @@
 
 <textarea id="besoins" rows="4" placeholder="Mes besoins de la semaine, un par ligne : lait, pâtes, lessive…"></textarea>
 <p><label>Budget (€) <input type="number" id="budget" min="0" step="1"></label></p>
+<p><label><input type="checkbox" id="drive" style="width:auto" checked> Je peux passer par le drive
+<span class="muted">(décoché : seulement les promos valables en magasin)</span></label></p>
 <p><button id="btn-panier" class="grand">🛒 Préparer mon panier</button></p>
 <p class="muted">Lit tout seul les catalogues de la semaine, puis compose le panier avec tes offres perso.
 <br><span id="progression"></span></p>
 <div id="panier"></div>
 
 <h2>Mes offres perso</h2>
-<p class="muted">Quand tes bons ou challenges changent, choisis tes captures de l'appli Carrefour : elles sont analysées tout de suite.
-Les offres expirées disparaissent toutes seules.</p>
-<input type="file" id="captures" accept="image/*" multiple>
+<p class="muted">Le plus simple : dans l'appli Carrefour, lance l'<strong>enregistrement d'écran</strong> du téléphone, fais défiler
+tes bons (onglets magasin et drive) puis tes challenges, arrête, et choisis la vidéo ici. Une seule vidéo suffit.
+Tu peux aussi choisir plusieurs captures d'un coup. Les offres expirées disparaissent toutes seules.</p>
+<input type="file" id="captures" accept="image/*,video/*" multiple>
 <p id="cagnotte" class="muted"></p>
 <ul id="offres"></ul>
 <p><button id="btn-vider" class="x" style="float:none">Tout effacer</button></p>
@@ -61,6 +68,7 @@ function charger() {
   try {
     Object.assign(etat, JSON.parse(localStorage.getItem("etat") || "{}"));
     for (const c of CHAMPS) $(c).value = localStorage.getItem(c) || "";
+    $("drive").checked = localStorage.getItem("drive") !== "0";
   } catch {}
 }
 function sauver() {
@@ -168,7 +176,7 @@ $("captures").onchange = async () => {
   if (!fichiers.length) return;
   const fd = new FormData();
   for (const f of fichiers) fd.append("captures", f);
-  try { ajouterOffres(await appel("/api/extraction", { method: "POST", body: fd }, "Lecture de tes captures…")); }
+  try { ajouterOffres(await appel("/api/extraction", { method: "POST", body: fd }, "Lecture de tes bons et challenges…")); }
   finally { $("captures").value = ""; }
 };
 
@@ -180,6 +188,7 @@ $("offres").onclick = (e) => {
 
 $("btn-vider").onclick = () => { etat.offres = []; etat.solde_cagnotte = null; sauver(); afficherOffres(); };
 for (const c of CHAMPS) $(c).oninput = sauver;
+$("drive").onchange = () => { try { localStorage.setItem("drive", $("drive").checked ? "1" : "0"); } catch {} };
 
 $("btn-panier").onclick = async () => {
   $("btn-panier").disabled = true;
@@ -202,6 +211,7 @@ async function preparer() {
       budget: $("budget").value ? +$("budget").value : null,
       offres: [...etat.offres, ...semaine.offres],
       solde_cagnotte: etat.solde_cagnotte,
+      drive: $("drive").checked,
     }),
   }, `Composition du panier avec ${semaine.offres.length} promos de ${semaine.catalogues.length} catalogues…`);
   $("panier").innerHTML = `

@@ -14,7 +14,8 @@ from .catalogues import Catalogue
 from .models import DemandePanier, Extraction, Offre, Panier
 
 TYPES_IMAGE = {"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
-MAX_CAPTURES = 10
+TYPES_VIDEO = {"video/mp4", "video/quicktime", "video/webm", "video/3gpp", "video/x-matroska"}
+MAX_CAPTURES = 60
 
 log = logging.getLogger("uvicorn.error")
 # Affiche chaque requête HTTP vers Gemini et ses réessais (429, 503) dans la fenêtre noire
@@ -86,7 +87,7 @@ async def extraction(captures: list[UploadFile]) -> Extraction:
         raise HTTPException(400, f"Entre 1 et {MAX_CAPTURES} captures")
     images = []
     for c in captures:
-        if c.content_type not in TYPES_IMAGE:
+        if c.content_type not in TYPES_IMAGE | TYPES_VIDEO:
             raise HTTPException(400, f"{c.filename} : format non supporté")
         images.append((await c.read(), c.content_type))
     return ia.extraire_offres(images)
