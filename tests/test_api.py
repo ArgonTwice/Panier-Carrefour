@@ -392,3 +392,10 @@ def test_panier_magasin_seulement(monkeypatch):
     ia.composer_panier(DemandePanier(besoins=["lait"], offres=[OFFRE, drive], drive=False))
     assert "BON DRIVE" not in prompts[0] and "mercredis des produits frais" not in prompts[0]
     assert "en magasin uniquement" in prompts[0]
+
+
+def test_mot_de_passe_en_ligne(monkeypatch):
+    monkeypatch.setenv("APP_MOT_DE_PASSE", "secret")
+    assert client.get("/").status_code == 401
+    assert client.get("/", auth=("antho", "faux")).status_code == 401
+    assert client.get("/", auth=("antho", "secret")).status_code == 200

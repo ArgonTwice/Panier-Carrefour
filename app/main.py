@@ -1,11 +1,14 @@
+import base64
 import logging
+import os
+import secrets
 import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -67,8 +70,22 @@ async def lifespan(app):
 app = FastAPI(title="Panier Carrefour", lifespan=lifespan)
 
 
+def _autorise(request: Request) -> bool:
+    # En ligne, APP_MOT_DE_PASSE protège l'appli (et donc la clé Gemini) ; en local il n'est pas défini
+    attendu = os.environ.get("APP_MOT_DE_PASSE")
+    if not attendu:
+        return True
+    try:
+        _, mot_de_passe = base64.b64decode(request.headers["authorization"].removeprefix("Basic ")).decode().split(":", 1)
+    except (KeyError, ValueError):
+        return False
+    return secrets.compare_digest(mot_de_passe.encode(), attendu.encode())
+
+
 @app.middleware("http")
 async def sans_cache(request: Request, suite):
+    if not _autorise(request):
+        return Response("Mot de passe requis", status_code=401, headers={"WWW-Authenticate": 'Basic realm="Panier"'})
     # Le navigateur recharge toujours la page : une mise à jour de l'appli est prise en compte tout de suite
     reponse = await suite(request)
     reponse.headers["Cache-Control"] = "no-store"

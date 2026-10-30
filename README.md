@@ -26,3 +26,12 @@ Il te dit quand et où commander, et sépare l'économie en caisse de celle en c
 ```bash
 pytest
 ```
+
+## Sur le téléphone (Render, gratuit)
+
+1. Sur render.com, inscris-toi avec GitHub, puis New > Blueprint > ce dépôt.
+2. Renseigne `GEMINI_API_KEY` (ta clé) et `APP_MOT_DE_PASSE` (au choix), puis Apply.
+3. Ouvre le lien `https://….onrender.com` sur le téléphone (n'importe quel identifiant + le mot de passe),
+   puis « Ajouter à l'écran d'accueil ».
+
+Le service gratuit s'endort après 15 min sans visite : la première ouverture prend environ 1 min.
