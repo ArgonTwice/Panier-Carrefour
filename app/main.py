@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,14 +19,20 @@ MAX_CAPTURES = 10
 log = logging.getLogger("uvicorn.error")
 
 
-lecture = {"en_cours": False, "erreur": None}
+lecture = {"en_cours": False, "erreur": None, "catalogue": None}
 
 
 def lire_en_fond():
     """Lit un à un les catalogues pas encore en cache ; s'arrête net si le quota du jour est atteint."""
     try:
         for c in catalogues.catalogues_en_cours():
-            catalogues.lire_avec_cache(c, lambda c: ia.lire_catalogue(c, catalogues.pages(c.id)))
+            if catalogues.est_en_cache(c):
+                continue
+            lecture["catalogue"] = c.titre
+            log.info("Lecture du catalogue %s…", c.titre)
+            debut = time.monotonic()
+            offres = catalogues.lire_avec_cache(c, lambda c: ia.lire_catalogue(c, catalogues.pages(c.id)))
+            log.info("%s : %d promos lues en %.0f s", c.titre, len(offres), time.monotonic() - debut)
         lecture["erreur"] = None
         log.info("Catalogues de la semaine lus")
     except ia.QuotaEpuise as e:
@@ -36,6 +43,7 @@ def lire_en_fond():
         log.exception("Lecture des catalogues en arrière-plan impossible")
     finally:
         lecture["en_cours"] = False
+        lecture["catalogue"] = None
 
 
 def relancer_lecture():
@@ -89,12 +97,13 @@ def promos_semaine() -> PromosSemaine:
 def progression() -> dict:
     en_cours = catalogues.catalogues_en_cours()
     return {"lus": sum(catalogues.est_en_cache(c) for c in en_cours), "total": len(en_cours),
-            "en_cours": lecture["en_cours"], "erreur": lecture["erreur"]}
+            "en_cours": lecture["en_cours"], "erreur": lecture["erreur"], "catalogue": lecture["catalogue"]}
 
 
 @app.post("/api/panier")
 def panier(demande: DemandePanier) -> Panier:
-    if not demande.offres:
+    # Sans catalogue lu ni offre perso, le panier s'appuie quand même sur les avantages carte PASS
+    if not demande.offres and not demande.carte_pass:
         raise HTTPException(400, "Aucune offre trouvée")
     return ia.composer_panier(demande)
 

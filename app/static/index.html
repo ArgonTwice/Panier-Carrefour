@@ -217,13 +217,13 @@ async function preparer() {
 // Les catalogues sont lus en arrière-plan dès le lancement : on affiche où en est la lecture
 async function suivreLecture() {
   try {
-    const { lus, total, en_cours, erreur } = await (await fetch("/api/progression")).json();
+    const { lus, total, en_cours, erreur, catalogue } = await (await fetch("/api/progression")).json();
     $("progression").textContent = erreur
       ? `⚠️ ${erreur} (${lus}/${total} catalogues lus)`
       : lus < total
-        ? `Lecture des catalogues en arrière-plan : ${lus}/${total}… Tu peux déjà préparer ton panier.`
+        ? `Lecture des catalogues en arrière-plan : ${lus}/${total}${catalogue ? ` (en cours : ${catalogue}, 1 à 3 min)` : ""}… Tu peux déjà préparer ton panier.`
         : `✓ ${total} catalogues de la semaine prêts`;
-    if (en_cours) setTimeout(suivreLecture, 10000);
+    if (en_cours || (!erreur && lus < total)) setTimeout(suivreLecture, 10000);
   } catch { setTimeout(suivreLecture, 20000); }
 }
 

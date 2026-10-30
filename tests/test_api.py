@@ -50,8 +50,12 @@ def test_extraction_refuse_format_non_image():
     assert r.status_code == 400
 
 
-def test_panier_sans_offre():
-    assert client.post("/api/panier", json={"besoins": ["lait"], "offres": []}).status_code == 400
+def test_panier_sans_offre(monkeypatch):
+    # Aucun catalogue lu : le panier se fait quand même avec les avantages PASS
+    monkeypatch.setattr(ia, "_parse", lambda content, fmt: PropositionPanier(lignes=[], a_faire=[], offres_ecartees=[]))
+    assert client.post("/api/panier", json={"besoins": ["lait"], "offres": []}).status_code == 200
+    r = client.post("/api/panier", json={"besoins": ["lait"], "offres": [], "carte_pass": False})
+    assert r.status_code == 400
 
 
 def test_panier(monkeypatch):
@@ -242,7 +246,7 @@ def test_promos_semaine_renvoie_les_catalogues_deja_lus(monkeypatch, tmp_path):
     assert len(r["catalogues"]) == 1 and len(r["offres"]) == 1
     assert client.get("/api/progression").json()["lus"] == 1
     main.lire_en_fond()
-    assert client.get("/api/progression").json() == {"lus": 2, "total": 2, "en_cours": False, "erreur": None}
+    assert client.get("/api/progression").json() == {"lus": 2, "total": 2, "en_cours": False, "erreur": None, "catalogue": None}
 
 
 def test_lecture_de_fond_s_arrete_sur_quota(monkeypatch, tmp_path):
