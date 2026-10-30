@@ -10,8 +10,11 @@ AVANTAGES_PASS = [
           remise_texte="-15% tous les jours avec la carte PASS", remise_euros=None, pourcentage=15, seuil_achat=None,
           canal="tous", versement="cagnotte", conditions="Hors promotions en cours", date_fin=None),
     Offre(type="avantage", produit="Produits de marque Carrefour", marque="Carrefour",
-          remise_texte="-15% un jour par semaine avec la carte PASS", remise_euros=None, pourcentage=15,
-          seuil_achat=None, canal="drive", conditions="Un jour par semaine, en drive ou livraison", date_fin=None),
+          remise_texte="Mardi PASS : -15% sur les produits de marque Carrefour", remise_euros=None, pourcentage=15,
+          seuil_achat=None, canal="drive", jour="mardi",
+          # Jour donné par Antho (même jour que le début des catalogues). Cumul avec une promo et plafond non confirmés
+          conditions="Le mardi, en drive ou livraison, en payant avec la carte PASS ; ne pas compter de cumul avec une "
+                     "promo du catalogue", date_fin=None),
     Offre(type="avantage", produit="Rayon frais de la semaine", marque=None,
           remise_texte="Les mercredis des produits frais : 34% d'économies", remise_euros=None, pourcentage=34,
           seuil_achat=None, canal="drive", jour="mercredi",

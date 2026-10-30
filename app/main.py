@@ -8,14 +8,14 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import catalogues, ia, stockage
+from . import auto, catalogues, ia, notifications, stockage
 from .catalogues import Catalogue
-from .models import DemandePanier, Extraction, Offre, Panier
+from .models import DemandePanier, Extraction, LectureTicket, Offre, Panier
 
 TYPES_IMAGE = {"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
 TYPES_VIDEO = {"video/mp4", "video/quicktime", "video/webm", "video/3gpp", "video/x-matroska"}
@@ -46,6 +46,10 @@ def lire_en_fond():
             log.info("%s : %d promos lues en %.0f s", c.titre, len(offres), time.monotonic() - debut)
         lecture["erreur"] = None
         log.info("Catalogues de la semaine lus")
+        try:
+            auto.panier_de_la_semaine(en_cours)
+        except Exception:
+            log.exception("Panier automatique impossible")
     except ia.QuotaEpuise as e:
         lecture["erreur"] = str(e)
         log.warning("%s", e)
@@ -63,10 +67,19 @@ def relancer_lecture():
         threading.Thread(target=lire_en_fond, daemon=True).start()
 
 
+def reveiller():
+    """Au lancement et à chaque réveil planifié : rappel des bons, lecture des catalogues puis panier du mardi."""
+    try:
+        auto.rappeler_bons()
+    except Exception:
+        log.exception("Rappel des bons impossible")
+    relancer_lecture()
+
+
 @asynccontextmanager
 async def lifespan(app):
     # Les catalogues sont lus dès le lancement, pendant que l'utilisateur écrit ses besoins
-    relancer_lecture()
+    threading.Thread(target=reveiller, daemon=True).start()
     yield
 
 
@@ -87,7 +100,8 @@ def _autorise(request: Request) -> bool:
 
 @app.middleware("http")
 async def sans_cache(request: Request, suite):
-    if not _autorise(request):
+    # Le réveil planifié (GitHub Actions) n'a pas le mot de passe : il ne renvoie aucune donnée
+    if request.url.path != "/api/reveil" and not _autorise(request):
         return Response("Mot de passe requis", status_code=401, headers={"WWW-Authenticate": 'Basic realm="Panier"'})
     # Le navigateur recharge toujours la page : une mise à jour de l'appli est prise en compte tout de suite
     reponse = await suite(request)
@@ -139,6 +153,40 @@ def panier(demande: DemandePanier) -> Panier:
     if not demande.offres and not demande.carte_pass:
         raise HTTPException(400, "Aucune offre trouvée")
     return ia.composer_panier(demande)
+
+
+@app.post("/api/ticket")
+async def ticket(photos: list[UploadFile], challenges: str = Form("[]")) -> LectureTicket:
+    if not 0 < len(photos) <= 10:
+        raise HTTPException(400, "Entre 1 et 10 photos du ticket")
+    images = []
+    for f in photos:
+        if f.content_type not in TYPES_IMAGE:
+            raise HTTPException(400, f"{f.filename} : prends une photo du ticket")
+        images.append((await f.read(), f.content_type))
+    return ia.lire_ticket(images, [Offre.model_validate(c) for c in json.loads(challenges)])
+
+
+@app.get("/api/reveil")
+def reveil() -> dict:
+    threading.Thread(target=reveiller, daemon=True).start()
+    return {"ok": True}
+
+
+@app.get("/api/notifications")
+def cle_notifications() -> dict:
+    return {"cle": notifications.cle_publique()}
+
+
+@app.post("/api/notifications")
+def abonner(abonnement: dict) -> dict:
+    notifications.abonner(abonnement)
+    return {"ok": True}
+
+
+@app.post("/api/notifications/essai")
+def essai_notification() -> dict:
+    return {"envoyes": notifications.envoyer("🛒 Panier Carrefour", "Les notifications marchent sur cet appareil")}
 
 
 @app.get("/api/etat")

@@ -90,3 +90,26 @@ class DemandePanier(BaseModel):
     habituels: list[str] = []
     stock: list[str] = []
     historique: list[Releve] = []
+
+
+class LigneTicket(BaseModel):
+    produit: str = Field(description="Nom du produit en clair, ex. 'Lait demi-écrémé 1 L' pour 'CRF LAIT 1/2 ECR 1L'")
+    marque: str | None
+    quantite: int = Field(default=1, description="Nombre d'articles")
+    prix_unitaire: float | None = Field(description="Prix payé pour un article en €, remises de la ligne déduites")
+    prix_total: float = Field(description="Montant de la ligne en €")
+    se_conserve: bool = Field(description="true si le produit se garde plus d'un mois fermé : épicerie sèche, "
+                                          "conserves, surgelés, boissons, hygiène, entretien")
+
+
+class AchatChallenge(BaseModel):
+    numero: int = Field(description="Numéro du challenge dans la liste fournie")
+    montant: float = Field(description="Montant en € des achats du ticket qui comptent pour ce challenge")
+
+
+class LectureTicket(BaseModel):
+    date: str | None = Field(description="Date du ticket au format AAAA-MM-JJ")
+    total: float | None = Field(description="Total payé en €")
+    solde_cagnotte: float | None = Field(description="Nouveau solde de la cagnotte en € s'il est imprimé")
+    lignes: list[LigneTicket]
+    challenges: list[AchatChallenge] = Field(default=[], description="Seulement les challenges avec un montant > 0")
