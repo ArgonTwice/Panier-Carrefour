@@ -19,6 +19,18 @@ Le calcul tient compte :
 - de l'historique des prix relevés, pour repérer les fausses promos ;
 - de ta liste habituelle et de ton stock (dans « Mes habitudes »).
 
+Pour aller plus vite :
+- **🎤 Dicter** tes besoins, ou **⚡ Comme d'habitude** (ta liste habituelle, moins ce qui est en stock).
+- **🧾 Photo du ticket de caisse** après les courses : prix réels relevés, progression des challenges mise à jour,
+  produits qui se conservent ajoutés au stock, et un produit acheté sur 2 tickets devient une habitude.
+- **🔔 Me prévenir** : notification quand le panier de la semaine est prêt, et pour les bons qui expirent sous 3 jours.
+  Sur iPhone, ajoute d'abord l'appli à l'écran d'accueil.
+
+Le **mardi** (sortie des catalogues et Mardi PASS), l'appli lit les nouveaux catalogues et prépare le panier toute seule
+avec tes besoins (ou « comme d'habitude »). En ligne, Render s'endort : le workflow GitHub `reveil.yml` la réveille
+le mardi matin et chaque jour pour les rappels. Si l'adresse de ton appli n'est pas `https://panier-carrefour.onrender.com`,
+mets-la dans la variable `APP_URL` du dépôt (Settings > Secrets and variables > Actions > Variables).
+
 Il te dit quand et où commander, et sépare l'économie en caisse de celle en cagnotte. Tout l'état perso reste dans le navigateur (localStorage).
 
 ## Tests

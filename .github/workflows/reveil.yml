@@ -1,0 +1,14 @@
+# Réveille l'appli en ligne (Render s'endort après 15 min) pour qu'elle travaille seule :
+# le mardi matin, lecture des nouveaux catalogues puis panier préparé et notifié ; chaque jour, rappel des bons.
+# Adresse de l'appli : variable APP_URL du dépôt (Settings > Secrets and variables > Actions > Variables).
+name: Réveil de l'appli
+on:
+  schedule:
+    - cron: "*/10 5-9 * * 2"  # mardi 6 h-11 h (heure de Paris) : réveils rapprochés pendant la lecture des catalogues
+    - cron: "0 6 * * *"       # chaque jour vers 7 h-8 h : rappel des bons qui expirent
+  workflow_dispatch:
+jobs:
+  reveil:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS --retry 3 --retry-delay 30 --max-time 120 "${{ vars.APP_URL || 'https://panier-carrefour.onrender.com' }}/api/reveil"

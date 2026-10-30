@@ -10,13 +10,6 @@ from app import catalogues, historique, ia, main, stockage
 from app.models import (DemandePanier, Extraction, LectureCatalogue, LignePanier, Offre, PromoCatalogue,
                         PropositionPanier, Releve)
 
-@pytest.fixture(autouse=True)
-def quotas_neufs(monkeypatch, tmp_path):
-    monkeypatch.setattr(ia, "_epuises", {})
-    monkeypatch.setattr(stockage, "_memoire", {})
-    monkeypatch.setattr(stockage, "DOSSIER", tmp_path / "data")
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-
 
 client = TestClient(main.app)
 

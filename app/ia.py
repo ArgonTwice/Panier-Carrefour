@@ -14,7 +14,7 @@ from google.genai import errors, types
 from .avantages import AVANTAGES_PASS
 from .catalogues import Catalogue
 from .historique import annoter
-from .models import DemandePanier, Extraction, LectureCatalogue, Offre, Panier, PropositionPanier
+from .models import DemandePanier, Extraction, LectureCatalogue, LectureTicket, Offre, Panier, PropositionPanier
 
 log = logging.getLogger("uvicorn.error")
 
@@ -196,6 +196,22 @@ def _envoyer_video(data: bytes, media_type: str) -> types.File:
 
 def _parts(images: list[tuple[bytes, str]]) -> list[types.Part]:
     return [types.Part.from_bytes(data=data, mime_type=media_type) for data, media_type in images]
+
+
+PROMPT_TICKET = """Ces photos sont un ticket de caisse Carrefour (éventuellement en plusieurs morceaux).
+Liste chaque article acheté une seule fois, avec son nom en clair et le prix réellement payé.
+Ignore les lignes de remise globale, de paiement et de TVA, mais déduis d'une ligne la remise qui lui est rattachée.
+Challenges en cours du client (numéro : produits concernés et conditions) :
+{challenges}
+Pour chaque challenge, additionne le montant des articles du ticket qui comptent pour lui.
+N'invente rien : ce qui est illisible vaut null."""
+
+
+def lire_ticket(photos: list[tuple[bytes, str]], challenges: list[Offre]) -> LectureTicket:
+    """Ticket de caisse lu en une requête : prix réels, achats comptant pour les challenges."""
+    liste = "\n".join(f"{i} : {c.produit} ({c.marque or 'toutes marques'}) {c.conditions or ''}"
+                      for i, c in enumerate(challenges)) or "aucun"
+    return _parse([*_parts(photos), PROMPT_TICKET.format(challenges=liste)], LectureTicket, delai=120, max_sortie=16384)
 
 
 def lire_catalogue(catalogue: Catalogue, pages: list[tuple[bytes, str]], par_appel: int = 50) -> tuple[Extraction, bool]:

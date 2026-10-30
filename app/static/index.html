@@ -29,6 +29,10 @@
   .ligne { display: flex; gap: 12px; margin: 12px 0; } .ligne label { flex: 1; }
   details { margin-top: 1.5rem; } summary { cursor: pointer; padding: 6px 0; }
   .secondaire { background: none; color: var(--accent); border: 1px solid var(--accent); }
+  .outils { display: flex; gap: 8px; margin-top: 8px; } .outils button { flex: 1; }
+  #alertes { background: #fff4d6; color: #5a4300; border-radius: 6px; padding: 8px 12px; }
+  #alertes:empty { display: none; }
+  .ok { color: var(--ok); }
   .coche strong { text-decoration: line-through; opacity: .5; }
   /* Mode courses : seulement la liste, en gros, pour cocher en rayon */
   body.courses #saisie, body.courses details, body.courses .detail, body.courses h1 { display: none; }
@@ -39,9 +43,14 @@
 <body>
 <h1>🛒 Panier Carrefour</h1>
 <p id="statut"></p>
+<p id="alertes"></p>
 
 <div id="saisie">
 <textarea id="besoins" rows="4" placeholder="Ce qu'il te faut cette semaine, un par ligne : lait, pâtes, lessive…"></textarea>
+<div class="outils">
+  <button id="btn-voix" class="secondaire" hidden>🎤 Dicter</button>
+  <button id="btn-habitude" class="secondaire">⚡ Comme d'habitude</button>
+</div>
 <div class="ligne">
   <label>Budget (€) <input type="number" id="budget" min="0" step="1"></label>
   <label>Où ? <select id="canal">
@@ -52,8 +61,12 @@
 </div>
 <p><button id="btn-panier" class="grand">🛒 Préparer mon panier</button></p>
 <p class="muted" id="progression"></p>
+<p><button id="btn-notifs" class="secondaire" hidden>🔔 Me prévenir sur ce téléphone</button>
+<span id="aide-notifs" class="muted" hidden>Pour être prévenu (panier du mardi, bons qui expirent) : ajoute l'appli à l'écran d'accueil, puis ouvre-la de là.</span></p>
 </div>
 <div id="panier"></div>
+<p><button id="btn-ticket" class="grand secondaire">🧾 Photo du ticket de caisse</button>
+<input type="file" id="ticket" accept="image/*" capture="environment" multiple hidden></p>
 
 <details>
 <summary><strong>Mes bons et challenges</strong> <span id="nb-offres" class="muted"></span></summary>
@@ -66,11 +79,11 @@ Tu peux aussi choisir plusieurs captures d'un coup. Les offres expirées dispara
 <p><button id="btn-vider" class="x" style="float:none">Tout effacer</button></p>
 </details>
 
-<details>
+<details id="habitudes">
 <summary><strong>Mes habitudes</strong></summary>
 <p><label>Ce que j'achète d'habitude <span class="muted">(l'appli propose d'en stocker quand c'est au plus bas)</span>
 <textarea id="habituels" rows="4" placeholder="Café, pâtes, papier toilette, lessive…"></textarea></label></p>
-<p><label>Déjà en stock à la maison <span class="muted">(ne sera pas reproposé)</span>
+<p><label>Déjà en stock à la maison <span class="muted">(ne sera pas reproposé ; complété par tes tickets)</span>
 <textarea id="stock" rows="3" placeholder="Riz, huile…"></textarea></label></p>
 <p id="historique" class="muted"></p>
 </details>
@@ -139,7 +152,19 @@ function details(o) {
   ].filter(Boolean).map(esc).join(" · ");
 }
 
+const JOURS = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+const jourIso = (decalage = 0) => new Date(Date.now() + decalage * 864e5).toISOString().slice(0, 10);
+
+// Bons qui expirent dans 3 jours ou moins : rappelés en haut de l'écran (et par notification côté serveur)
+function afficherAlertes() {
+  const bons = etat.offres.filter((o) => o.type === "bon" && o.date_fin && o.date_fin <= jourIso(3));
+  $("alertes").innerHTML = bons.length
+    ? `⏰ À utiliser vite : ${bons.map((o) => `<strong>${esc(o.produit)}</strong> (${o.date_fin === jourIso() ? "aujourd'hui" : JOURS[new Date(o.date_fin).getDay()]})`).join(", ")}`
+    : "";
+}
+
 function afficherOffres() {
+  afficherAlertes();
   $("nb-offres").textContent = etat.offres.length ? `(${etat.offres.length})` : "· ajoute-les ici";
   $("cagnotte").textContent = etat.solde_cagnotte != null ? `Cagnotte : ${etat.solde_cagnotte} €` : "";
   if (!etat.offres.length) { $("offres").innerHTML = '<li class="muted">Aucune offre pour l\'instant.</li>'; return; }
@@ -272,6 +297,7 @@ function afficherPanier() {
   $("panier").innerHTML = `
     <p><button id="btn-courses" class="grand secondaire">${document.body.classList.contains("courses") ? "✓ Terminer les courses" : "🧺 Mode courses (liste en gros)"}</button></p>
     <div class="detail">
+    ${p.auto ? `<p class="muted">✨ Préparé tout seul le ${new Date(p.auto).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} avec les nouveaux catalogues</p>` : ""}
     <p><strong>Total estimé : ${p.total_estime} €</strong> · <span class="eco">Économie : ${p.economie_totale} €</span>
     ${p.economie_cagnotte ? `<br><span class="muted">dont ${p.economie_cagnotte} € en cagnotte, ${(p.economie_totale - p.economie_cagnotte).toFixed(2)} € en caisse</span>` : ""}
     ${p.hors_budget ? '<br><span class="err">Dépasse le budget</span>' : ""}</p>
@@ -314,6 +340,130 @@ async function suivreLecture() {
   } catch { setTimeout(suivreLecture, 20000); }
 }
 
+// Rapprochement de noms de produits : "pâtes" correspond à "Pâtes Barilla 500 g"
+const mots = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().match(/[a-z0-9]+/g)?.map((m) => m.replace(/[sx]$/, "")) || [];
+function correspond(court, long) {
+  const dans = new Set(mots(long)), cherches = mots(court);
+  return cherches.length > 0 && cherches.every((m) => dans.has(m));
+}
+const memeProduit = (a, b) => correspond(a, b) || correspond(b, a);
+
+$("btn-habitude").onclick = () => {
+  const stock = lignes("stock");
+  const habituels = lignes("habituels").filter((h) => !stock.some((s) => memeProduit(h, s)));
+  if (!lignes("habituels").length) {
+    $("habitudes").open = true;
+    $("statut").className = "muted";
+    $("statut").textContent = "Remplis « Ce que j'achète d'habitude » (tes tickets le complètent tout seuls).";
+    return;
+  }
+  const besoins = lignes("besoins");
+  $("besoins").value = besoins.concat(habituels.filter((h) => !besoins.some((b) => memeProduit(b, h)))).join("\n");
+  sauver();
+};
+
+// Dictée : "du lait, des pâtes et de la lessive" -> une ligne par produit
+const Reconnaissance = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (Reconnaissance) {
+  $("btn-voix").hidden = false;
+  $("btn-voix").onclick = () => {
+    const r = new Reconnaissance();
+    r.lang = "fr-FR";
+    r.onstart = () => { $("btn-voix").textContent = "🎤 Je t'écoute…"; };
+    r.onend = () => { $("btn-voix").textContent = "🎤 Dicter"; };
+    r.onresult = (e) => {
+      const dits = e.results[0][0].transcript.split(/,| et | puis |\./i)
+        .map((s) => s.trim().replace(/^(du|de la|de l'|des|un|une|le|la|les)\s+/i, "")).filter(Boolean);
+      $("besoins").value = lignes("besoins").concat(dits).join("\n");
+      sauver();
+    };
+    r.start();
+  };
+}
+
+// Ticket de caisse : vrais prix, progression des challenges, stock et habitudes mis à jour
+$("btn-ticket").onclick = () => $("ticket").click();
+$("ticket").onchange = async () => {
+  const fichiers = $("ticket").files;
+  if (!fichiers.length) return;
+  try { await lireTicket(fichiers); } catch {} finally { $("ticket").value = ""; }
+};
+
+async function lireTicket(fichiers) {
+  const challenges = etat.offres.filter((o) => o.type === "challenge");
+  const fd = new FormData();
+  for (const f of fichiers) fd.append("photos", f);
+  fd.append("challenges", JSON.stringify(challenges));
+  const t = await appel("/api/ticket", { method: "POST", body: fd }, "Lecture du ticket…");
+  const id = t.date && t.total != null ? `${t.date}|${t.total}` : String(Date.now()); // même ticket envoyé deux fois : compté une fois
+  etat.tickets ||= [];
+  if (etat.tickets.includes(id)) { $("statut").textContent = "Ce ticket est déjà enregistré."; return; }
+  etat.tickets = etat.tickets.concat(id).slice(-50);
+
+  releverPrix(t.lignes.map((l) => ({ produit: l.produit, marque: l.marque, date_fin: t.date,
+    prix_euros: l.prix_unitaire ?? +(l.prix_total / (l.quantite || 1)).toFixed(2) })));
+
+  const bilan = [];
+  for (const a of t.challenges) {
+    const c = challenges[a.numero];
+    if (!c || !(a.montant > 0)) continue;
+    c.deja_achete = +((c.deja_achete || 0) + a.montant).toFixed(2);
+    bilan.push(`${c.produit} +${a.montant.toFixed(2)} €`);
+  }
+
+  const stock = lignes("stock");
+  const ajouts = t.lignes.filter((l) => l.se_conserve && !stock.some((s) => memeProduit(s, l.produit))).map((l) => l.produit);
+  $("stock").value = stock.concat(ajouts).join("\n");
+  $("besoins").value = lignes("besoins").filter((b) => !t.lignes.some((l) => correspond(b, l.produit))).join("\n");
+
+  // Acheté sur 2 tickets différents : devient une habitude
+  etat.achats = (etat.achats || []).concat(t.lignes.map((l) => ({ produit: l.produit, ticket: id }))).slice(-1000);
+  const tickets = {};
+  for (const a of etat.achats) (tickets[mots(a.produit).join(" ")] ||= { produit: a.produit, ids: new Set() }).ids.add(a.ticket);
+  const habituels = lignes("habituels");
+  const nouvelles = Object.values(tickets).filter((x) => x.ids.size >= 2 && !habituels.some((h) => memeProduit(h, x.produit))).map((x) => x.produit);
+  $("habituels").value = habituels.concat(nouvelles).join("\n");
+
+  if (t.solde_cagnotte != null) etat.solde_cagnotte = t.solde_cagnotte;
+  sauver(); afficherOffres();
+  $("statut").className = "ok";
+  $("statut").textContent = [`✓ Ticket lu : ${t.lignes.length} articles${t.total != null ? `, ${t.total} €` : ""}`,
+    bilan.length && `challenges : ${bilan.join(", ")}`, ajouts.length && `${ajouts.length} produits ajoutés au stock`,
+    nouvelles.length && `${nouvelles.length} nouvelles habitudes`].filter(Boolean).join(" · ");
+}
+
+// Notifications : panier préparé le mardi, bons qui expirent
+async function preparerNotifs() {
+  if (!("serviceWorker" in navigator)) return;
+  const reg = await navigator.serviceWorker.register("sw.js");
+  if (!("PushManager" in window)) {
+    // iPhone : les notifications ne marchent que dans l'appli ajoutée à l'écran d'accueil
+    $("aide-notifs").hidden = !/iPhone|iPad/.test(navigator.userAgent);
+    return;
+  }
+  const abonnement = await reg.pushManager.getSubscription();
+  if (abonnement) envoyerAbonnement(abonnement); // le serveur peut l'avoir perdu (base vidée)
+  else $("btn-notifs").hidden = false;
+}
+const envoyerAbonnement = (a) => fetch("/api/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(a) });
+
+$("btn-notifs").onclick = async () => {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const { cle } = await (await fetch("/api/notifications")).json();
+    const brut = atob(cle.replace(/-/g, "+").replace(/_/g, "/"));
+    const abonnement = await reg.pushManager.subscribe({ userVisibleOnly: true,
+      applicationServerKey: Uint8Array.from(brut, (c) => c.charCodeAt(0)) });
+    await envoyerAbonnement(abonnement);
+    await fetch("/api/notifications/essai", { method: "POST" });
+    $("btn-notifs").hidden = true;
+  } catch (e) {
+    $("statut").className = "err";
+    $("statut").textContent = "Notifications refusées : autorise-les dans les réglages du navigateur.";
+  }
+};
+
+preparerNotifs().catch(() => {});
 suivreLecture();
 charger(); purgerExpirees(); sauver(); afficherOffres(); afficherHistorique(); afficherPanier();
 synchroniser();
