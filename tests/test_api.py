@@ -1,5 +1,6 @@
 from datetime import date
 
+import httpx
 import pytest
 
 from fastapi.testclient import TestClient
@@ -84,6 +85,17 @@ def test_extraire_offres_appelle_gemini(monkeypatch):
     assert extraction.offres == [OFFRE]
     assert appel["config"].response_schema is Extraction
     assert appel["contents"][0].inline_data.mime_type == "image/png"
+    assert appel["config"].http_options.timeout == 120_000
+
+
+def test_gemini_trop_long(monkeypatch):
+    class FauxModels:
+        def generate_content(self, **kw):
+            raise httpx.ReadTimeout("trop long")
+
+    monkeypatch.setattr(ia, "_instance", type("C", (), {"models": FauxModels()})())
+    with pytest.raises(RuntimeError, match="n'a pas répondu en 120 s"):
+        ia.extraire_offres([(b"img", "image/png")])
 
 
 LISTE_HTML = """<script type="application/ld+json">{"@graph": [
@@ -127,7 +139,7 @@ CAT = catalogues.Catalogue(id=42, titre="T", debut=date(2026, 10, 27), fin=date(
 def test_lire_catalogue_en_peu_de_requetes(monkeypatch):
     lots = []
 
-    def faux_parse(contents, schema):
+    def faux_parse(contents, schema, **_):
         lots.append(len(contents) - 1)
         return LECTURE
 
@@ -139,7 +151,7 @@ def test_lire_catalogue_en_peu_de_requetes(monkeypatch):
 
 
 def test_lire_catalogue_saute_un_lot_en_echec(monkeypatch):
-    def faux_parse(contents, schema):
+    def faux_parse(contents, schema, **_):
         if len(contents) == 26:
             raise RuntimeError("tronqué")
         return LECTURE
@@ -150,7 +162,7 @@ def test_lire_catalogue_saute_un_lot_en_echec(monkeypatch):
 
 
 def test_lire_catalogue_s_arrete_si_quota_du_jour(monkeypatch):
-    def faux_parse(contents, schema):
+    def faux_parse(contents, schema, **_):
         raise ia.QuotaEpuise("quota")
 
     monkeypatch.setattr(ia, "_parse", faux_parse)

@@ -2,6 +2,9 @@ import json
 import logging
 import os
 import threading
+import time
+
+import httpx
 
 from google import genai
 from google.genai import types
@@ -96,15 +99,20 @@ def _client() -> genai.Client:
         return _instance
 
 
-def _parse(contents, schema):
-    # Clé lue dans GEMINI_API_KEY par le SDK
+def _parse(contents, schema, reflexion=types.ThinkingLevel.LOW, delai=120):
+    # Clé lue dans GEMINI_API_KEY par le SDK. Réflexion réduite et délai max : sans eux un appel peut durer des minutes
+    debut = time.monotonic()
     try:
         reponse = _client().models.generate_content(
             model=MODEL,
             contents=contents,
             config=types.GenerateContentConfig(
-                response_mime_type="application/json", response_schema=schema, max_output_tokens=65536),
+                response_mime_type="application/json", response_schema=schema, max_output_tokens=65536,
+                thinking_config=types.ThinkingConfig(thinking_level=reflexion),
+                http_options=types.HttpOptions(timeout=delai * 1000, retry_options=RETRY.retry_options)),
         )
+    except httpx.TimeoutException as e:
+        raise RuntimeError(f"Gemini n'a pas répondu en {delai} s, réessaie dans un moment") from e
     except Exception as e:
         if _quota_journalier(e):
             raise QuotaEpuise("Quota gratuit de Gemini atteint pour aujourd'hui : réessaie demain") from e
@@ -114,6 +122,7 @@ def _parse(contents, schema):
         raise RuntimeError("Réponse de Gemini tronquée (trop d'offres d'un coup)")
     if not reponse.text:
         raise RuntimeError(f"Réponse vide de Gemini ({fin})")
+    log.info("Gemini : %s en %.0f s", schema.__name__, time.monotonic() - debut)
     return schema.model_validate_json(reponse.text)
 
 
@@ -131,7 +140,9 @@ def lire_catalogue(catalogue: Catalogue, pages: list[tuple[bytes, str]], par_app
     offres, complet = [], True
     for i in range(0, len(pages), par_appel):
         try:
-            lecture = _parse([*_parts(pages[i:i + par_appel]), prompt], LectureCatalogue)
+            # Simple recopie des pages : réflexion minimale, mais beaucoup de texte à écrire
+            lecture = _parse([*_parts(pages[i:i + par_appel]), prompt], LectureCatalogue,
+                             reflexion=types.ThinkingLevel.MINIMAL, delai=300)
         except QuotaEpuise:
             raise
         except Exception as e:
