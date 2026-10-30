@@ -90,7 +90,7 @@ def catalogues_en_cours(aujourdhui: date | None = None) -> list[Catalogue]:
 
 def pages(catalogue_id: int) -> list[tuple[bytes, str]]:
     html = _get(f"{SITE}/regardez/offres/catalogue-carrefour-{catalogue_id}").text
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=8) as pool:
         images = list(pool.map(lambda url: alleger(_get(url).content), parser_pages(html)))
     return [(image, "image/jpeg") for image in images]
 

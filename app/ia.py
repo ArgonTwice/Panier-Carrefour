@@ -7,7 +7,7 @@ import time
 import httpx
 
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 
 from .avantages import AVANTAGES_PASS
 from .catalogues import Catalogue
@@ -17,9 +17,9 @@ from .models import DemandePanier, Extraction, LectureCatalogue, Offre, Panier, 
 log = logging.getLogger("uvicorn.error")
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
-# Le palier gratuit limite les requêtes par minute : on réessaie au lieu d'échouer
-RETRY = types.HttpOptions(retry_options=types.HttpRetryOptions(
-    attempts=3, initial_delay=10, max_delay=40, http_status_codes=[429, 500, 503]))
+# Réessais faits à la main (voir _parse) : ceux du SDK relancent aussi un appel trop long, ce qui multiplie l'attente
+SANS_REESSAI = types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1))
+REESSAIS = (10, 30)
 
 
 class QuotaEpuise(RuntimeError):
@@ -95,32 +95,36 @@ def _client() -> genai.Client:
     global _instance
     with _verrou:
         if _instance is None:
-            _instance = genai.Client(http_options=RETRY)
+            _instance = genai.Client(http_options=SANS_REESSAI)
         return _instance
 
 
-def _parse(contents, schema, reflexion=types.ThinkingLevel.LOW, delai=120):
-    # Clé lue dans GEMINI_API_KEY par le SDK. Réflexion réduite et délai max : sans eux un appel peut durer des minutes
-    debut = time.monotonic()
-    log.info("Gemini : envoi %s (%d éléments)…", schema.__name__, len(contents) if isinstance(contents, list) else 1)
-    try:
-        reponse = _client().models.generate_content(
-            model=MODEL,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json", response_schema=schema, max_output_tokens=65536,
-                thinking_config=types.ThinkingConfig(thinking_level=reflexion),
-                http_options=types.HttpOptions(timeout=delai * 1000, retry_options=RETRY.retry_options)),
-        )
-    except httpx.TimeoutException as e:
-        raise RuntimeError(f"Gemini n'a pas répondu en {delai} s, réessaie dans un moment") from e
-    except Exception as e:
-        if _quota_journalier(e):
-            raise QuotaEpuise("Quota gratuit de Gemini atteint pour aujourd'hui : réessaie demain") from e
-        raise
+def _parse(contents, schema, reflexion=types.ThinkingLevel.LOW, delai=120, max_sortie=8192):
+    # Clé lue dans GEMINI_API_KEY par le SDK. Réflexion réduite, délai et taille de réponse bornés :
+    # sans ces limites, Gemini peut boucler des minutes en JSON
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json", response_schema=schema, max_output_tokens=max_sortie,
+        thinking_config=types.ThinkingConfig(thinking_level=reflexion),
+        http_options=types.HttpOptions(timeout=delai * 1000, retry_options=SANS_REESSAI.retry_options))
+    for attente in (*REESSAIS, None):
+        debut = time.monotonic()
+        log.info("Gemini : envoi %s…", schema.__name__)
+        try:
+            reponse = _client().models.generate_content(model=MODEL, contents=contents, config=config)
+            break
+        except httpx.TimeoutException as e:
+            raise RuntimeError(f"Gemini n'a pas répondu en {delai} s, réessaie dans un moment") from e
+        except errors.APIError as e:
+            if _quota_journalier(e):
+                raise QuotaEpuise("Quota gratuit de Gemini atteint pour aujourd'hui : réessaie demain") from e
+            # Limite par minute ou serveur surchargé : on patiente puis on réessaie
+            if e.code not in (429, 500, 503) or attente is None:
+                raise
+            log.warning("Gemini indisponible (%s), nouvel essai dans %d s", e.code, attente)
+            time.sleep(attente)
     fin = reponse.candidates[0].finish_reason if reponse.candidates else None
     if fin == types.FinishReason.MAX_TOKENS:
-        raise RuntimeError("Réponse de Gemini tronquée (trop d'offres d'un coup)")
+        raise RuntimeError("Réponse de Gemini trop longue, coupée : réessaie")
     if not reponse.text:
         raise RuntimeError(f"Réponse vide de Gemini ({fin})")
     log.info("Gemini : %s en %.0f s", schema.__name__, time.monotonic() - debut)
@@ -128,7 +132,7 @@ def _parse(contents, schema, reflexion=types.ThinkingLevel.LOW, delai=120):
 
 
 def extraire_offres(images: list[tuple[bytes, str]]) -> Extraction:
-    return _parse([*_parts(images), PROMPT_EXTRACTION], Extraction)
+    return _parse([*_parts(images), PROMPT_EXTRACTION], Extraction, max_sortie=16384)
 
 
 def _parts(images: list[tuple[bytes, str]]) -> list[types.Part]:
@@ -143,7 +147,7 @@ def lire_catalogue(catalogue: Catalogue, pages: list[tuple[bytes, str]], par_app
         try:
             # Simple recopie des pages : réflexion minimale, mais beaucoup de texte à écrire
             lecture = _parse([*_parts(pages[i:i + par_appel]), prompt], LectureCatalogue,
-                             reflexion=types.ThinkingLevel.MINIMAL, delai=300)
+                             reflexion=types.ThinkingLevel.MINIMAL, delai=300, max_sortie=65536)
         except QuotaEpuise:
             raise
         except Exception as e:

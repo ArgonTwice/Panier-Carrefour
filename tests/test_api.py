@@ -89,6 +89,21 @@ def test_extraire_offres_appelle_gemini(monkeypatch):
     assert appel["config"].http_options.timeout == 120_000
 
 
+def test_gemini_reessaie_sur_limite_par_minute(monkeypatch):
+    appels = []
+
+    class FauxModels:
+        def generate_content(self, **kw):
+            appels.append(1)
+            if len(appels) == 1:
+                raise ia.errors.APIError(429, {"error": {"message": "PerMinute", "status": "RESOURCE_EXHAUSTED"}})
+            return type("R", (), {"candidates": [], "text": Extraction(solde_cagnotte=None, offres=[]).model_dump_json()})()
+
+    monkeypatch.setattr(ia, "_instance", type("C", (), {"models": FauxModels()})())
+    monkeypatch.setattr(ia.time, "sleep", lambda s: None)
+    assert ia.extraire_offres([(b"img", "image/png")]).offres == [] and len(appels) == 2
+
+
 def test_gemini_trop_long(monkeypatch):
     class FauxModels:
         def generate_content(self, **kw):
