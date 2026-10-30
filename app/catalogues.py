@@ -1,6 +1,7 @@
 """Catalogues Carrefour publiés sur promocatalogues.fr (pages du catalogue en images)."""
 import io
 import json
+import logging
 import re
 import threading
 import time
@@ -73,6 +74,8 @@ def parser_pages(html: str) -> list[str]:
     return [CDN + p["page"].replace("%s", "large") for p in json.loads(m.group(1))]
 
 
+log = logging.getLogger("uvicorn.error")
+
 _liste: tuple[float, list[Catalogue]] = (0, [])
 
 
@@ -118,8 +121,18 @@ def est_en_cache(catalogue: Catalogue) -> bool:
 
 
 def offres_en_cache(catalogue: Catalogue) -> list[Offre]:
-    # En octets : Windows lirait sinon en cp1252 et casserait les accents
-    return Extraction.model_validate_json(_fichier(catalogue).read_bytes()).offres
+    brut = _fichier(catalogue).read_bytes()
+    try:
+        texte = brut.decode("utf-8")
+    except UnicodeDecodeError:
+        texte = brut.decode("cp1252", errors="replace")  # cache écrit par une ancienne version sous Windows
+    try:
+        return Extraction.model_validate_json(texte).offres
+    except ValueError:
+        # Cache illisible : on le supprime pour que le catalogue soit relu
+        log.warning("Cache du catalogue %s illisible, il sera relu", catalogue.titre)
+        _fichier(catalogue).unlink(missing_ok=True)
+        return []
 
 
 def lire_avec_cache(catalogue: Catalogue, lire) -> list[Offre]:
